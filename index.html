@@ -9,6 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <style>
 :root{
   --navy:#0B3350;
@@ -4437,6 +4438,10 @@ function dismissEmailReminder(){ localStorage.setItem('temesa_email_reminder_dis
  *  (mfumo mpya), inatuma nakala ya sasa (ya ndani/tupu) kwenda mtandaoni kama mwanzo. */
 async function bootFromCloud(){
   try{
+    // Sign in kimya kimya (bila jina/nenosiri) ili Firestore Security Rules ziweze
+    // kuruhusu ufikiaji WA APP HII TU (kupitia mtandao wa Firebase Auth), na kuzuia
+    // mtu yeyote wa nje asiye na app hii kufikia database moja kwa moja.
+    await firebase.auth().signInAnonymously();
     const snap = await dbDocRef.get();
     if(snap.exists && snap.data() && snap.data().json){
       DB = migrateDB(JSON.parse(snap.data().json));
