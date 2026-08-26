@@ -648,14 +648,34 @@ const CUSTOM_ROLE_OPTION = "__nyingine__";
 
 /** Roles eligible to be assigned to a vehicle job — anyone in the UKAGUZI or MATENGENEZO department, regardless of exact title. */
 function assignableStaff(){ return DB.staff.filter(s=> s.dept==='UKAGUZI' || s.dept==='MATENGENEZO'); }
-/** Renders a checkbox list so more than one person can be selected for a job (multiple technicians and/or multiple assistants). */
+/** Wafanyakazi wa kuchagulika kwa kazi ya gari: Wakaguzi na Mafundi wa Matengenezo WOTE wanaonekana (ili
+ *  fundi wa matengenezo aweze kufanya ukaguzi, na kinyume chake) - lakini wale wa kitengo husika (default)
+ *  wanaonekana JUU ya orodha, kama walivyokuwa wakionekana awali. */
+function vehicleTechOptions(unit){
+  const primaryDept = unit==='ukaguzi' ? 'UKAGUZI' : 'MATENGENEZO';
+  return assignableStaff().slice().sort((a,b)=>{
+    const ap = a.dept===primaryDept ? 0 : 1, bp = b.dept===primaryDept ? 0 : 1;
+    return ap-bp || a.name.localeCompare(b.name);
+  });
+}
+/** Renders a checkbox list so more than one person can be selected for a job (multiple technicians and/or
+ *  multiple assistants). Ina sehemu ya "search" juu ili kupata mtu kwa jina haraka orodha ikiwa ndefu. */
 function staffCheckboxGroup(containerId, options, selectedIds){
   selectedIds = selectedIds || [];
   if(options.length===0) return `<div class="small" style="color:var(--slate);">Hakuna mfanyakazi kwenye kitengo hiki bado.</div>`;
-  return `<div class="chip-row" id="${containerId}">${options.map(s=>`
-    <label style="display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:6px 10px;border-radius:7px;font-size:12.5px;cursor:pointer;background:${selectedIds.includes(s.id)?'#EFF6FF':'#fff'};">
-      <input type="checkbox" value="${s.id}" ${selectedIds.includes(s.id)?'checked':''}> ${esc(s.name)}
+  return `
+  <input type="text" placeholder="🔍 Andika jina kutafuta..." oninput="filterCheckboxGroup('${containerId}', this.value)" style="margin-bottom:6px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;width:100%;">
+  <div class="chip-row" id="${containerId}">${options.map(s=>`
+    <label data-search="${esc((s.name||'').toLowerCase())}" style="display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:6px 10px;border-radius:7px;font-size:12.5px;cursor:pointer;background:${selectedIds.includes(s.id)?'#EFF6FF':'#fff'};">
+      <input type="checkbox" value="${s.id}" ${selectedIds.includes(s.id)?'checked':''}> ${esc(s.name)}${s.dept?` <span class="opt" style="margin:0;">(${s.dept==='UKAGUZI'?'Ukaguzi':s.dept==='MATENGENEZO'?'Matengenezo':esc(s.dept)})</span>`:''}
     </label>`).join('')}</div>`;
+}
+/** Huficha (badala ya kufuta) label zisizolingana na maandishi ya search - hivyo checkbox zilizoshachaguliwa hazipotei. */
+function filterCheckboxGroup(containerId, query){
+  const q = (query||'').toLowerCase().trim();
+  document.querySelectorAll('#'+containerId+' label').forEach(lbl=>{
+    lbl.style.display = (!q || (lbl.dataset.search||'').includes(q)) ? 'flex' : 'none';
+  });
 }
 function readCheckedIds(containerId){
   return [...document.querySelectorAll('#'+containerId+' input:checked')].map(i=>i.value);
@@ -955,6 +975,11 @@ function vehiclePaidTotal(vId){ return DB.payments.filter(p=>p.vehicleId===vId).
  *  FY starts 1 Jul. Q1: Jul–Sep, Q2: Oct–Dec, Q3: Jan–Mar, Q4: Apr–Jun. H1: Jul–Dec, H2: Jan–Jun. */
 function fyYear(date){ const m = date.getMonth(); return m>=6 ? date.getFullYear() : date.getFullYear()-1; }
 function fyMonthIndex(date){ return (date.getMonth() - 6 + 12) % 12; } // 0 = July ... 11 = June
+/** Tarehe "halisi" ya kazi kwa ajili ya ripoti/uchujaji — hutumia tarehe ambayo kazi ilifanyika (Tarehe ya
+ *  Kukamilika, kisha Tarehe ya Kuanza) badala ya tarehe ya usajili tu (createdAt). Kwa mfano: kazi
+ *  iliyosajiliwa leo lakini ikaandikwa ilifanyika Julai, itasomeka kwenye ripoti za Julai. */
+function vehicleEffectiveDate(v){ return v.completedDate || v.startDate || (v.createdAt?v.createdAt.slice(0,10):todayISO()); }
+function mifumoEffectiveDate(j){ return j.completedDate || j.startDate || (j.createdAt?j.createdAt.slice(0,10):todayISO()); }
 function inRange(dateStr, range){
   const d = new Date(dateStr);
   const now = new Date();
@@ -1203,6 +1228,7 @@ function openVehicleForm(){
         <div id="f_regSearchResults" class="table-wrap" style="max-height:220px;overflow-y:auto;margin-bottom:10px;border:1px solid var(--line);border-radius:9px;display:none;"></div>
         <input type="hidden" id="f_regSelectedId">
         <div id="vExistingInfo" class="card-pad" style="display:none;background:#EFF6FF;border:1px solid var(--line);border-radius:9px;margin-bottom:14px;"></div>
+        <div id="vInspectionHint" class="card-pad" style="display:none;background:#FEF6E8;border:1px solid var(--amber);border-radius:9px;margin-bottom:14px;"></div>
         ${registry.length===0 ? '<div class="small" style="color:var(--red);margin-bottom:10px;">Hakuna gari lolote lililosajiliwa bado — tumia "Gari Jipya".</div>' : ''}
       </div>
       <div id="vNewBox" style="display:none;">
@@ -1220,7 +1246,7 @@ function openVehicleForm(){
       <div class="form-row">
         <div class="field"><label>Kilomita Zinazosoma Sasa *</label><input id="f_km" type="number" placeholder="mf. 84500"></div>
         <div class="field"><label>Kitengo *</label>
-          <select id="f_unit"><option value="ukaguzi">Ukaguzi</option><option value="matengenezo">Matengenezo</option></select>
+          <select id="f_unit" onchange="updateInspectionJobsHint()"><option value="ukaguzi">Ukaguzi</option><option value="matengenezo">Matengenezo</option></select>
         </div>
       </div>
       <div class="field"><label>Matengenezo Yanayohitajika Sasa *</label><textarea id="f_need" placeholder="Eleza tatizo / kazi zinazohitajika..."></textarea></div>
@@ -1286,6 +1312,38 @@ function selectVehicleFromSearch(regId){
     <div class="small" style="margin-top:6px;color:var(--slate);">Jaza tu sehemu mpya chini (Kilomita za Sasa, Kitengo, na tatizo la sasa) — taarifa nyingine hazihitaji kuandikwa upya.</div>
   `;
   if(lastKm!==null && lastKm!==undefined){ document.getElementById('f_km').value = lastKm; }
+  updateInspectionJobsHint();
+}
+/** Ukichagua Kitengo cha "Matengenezo" kwa gari ambalo tayari lina kazi ya "Ukaguzi" isiyofungwa kwenye
+ *  Matengenezo, tunaonyesha kazi hizo ili aendelee nazo badala ya kusajili kazi mpya inayofanana. */
+function updateInspectionJobsHint(){
+  const box = document.getElementById('vInspectionHint');
+  if(!box) return;
+  const regId = document.getElementById('f_regSelectedId').value;
+  const unit = document.getElementById('f_unit').value;
+  if(!regId || unit!=='matengenezo'){ box.style.display='none'; box.innerHTML=''; return; }
+  const inspectionJobs = DB.vehicles.filter(v=>v.vehicleRegId===regId && v.unit==='ukaguzi')
+    .sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  if(inspectionJobs.length===0){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:6px;">🔎 Gari hili lina kazi za Ukaguzi zilizosajiliwa tayari — endelea na moja badala ya kusajili mpya:</div>
+    ${inspectionJobs.map(v=>`<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-bottom:6px;">
+      <div class="small">${fmtDate(v.createdAt.slice(0,10))} — ${esc((v.neededMaintenance||'').slice(0,60))} <span class="badge ${STATUS_LABELS[v.status].cls} dot">${STATUS_LABELS[v.status].label}</span></div>
+      <button class="btn ghost sm" onclick="continueAsMaintenance('${v.id}')">Endelea Nayo (Matengenezo)</button>
+    </div>`).join('')}
+    <div class="small" style="color:var(--slate);">Kama huna moja inayolingana, endelea kujaza fomu chini kusajili kazi mpya.</div>
+  `;
+}
+/** Inabadilisha kazi ya Ukaguzi iliyopo kuwa Matengenezo (badala ya kusajili kazi mpya) na kufungua moja kwa moja. */
+function continueAsMaintenance(vehicleId){
+  const v = vehicleById(vehicleId);
+  if(!v) return;
+  v.unit = 'matengenezo';
+  saveDB(); closeModal();
+  toast("Umeendelea na kazi hii kama Matengenezo","green");
+  renderVehicles(document.getElementById('view_vehicles'));
+  openVehicleDetail(vehicleId);
 }
 function saveVehicle(){
   const usingExisting = document.querySelector('#vSourceTabs .pill-tab.active').dataset.src === 'existing';
@@ -1330,7 +1388,7 @@ function saveVehicle(){
 function openVehicleDetail(id){
   const v = vehicleById(id);
   if(!v) return;
-  const techOptions = assignableStaff().filter(s=> s.dept === (v.unit==='ukaguzi' ? 'UKAGUZI' : 'MATENGENEZO'));
+  const techOptions = vehicleTechOptions(v.unit);
   const parts = DB.spareParts.filter(p=>p.jobRefType==='vehicle' && p.jobRefId===id);
   const balance = Math.max(0, Number(v.totalCost||0) - vehiclePaidTotal(id));
 
@@ -3483,7 +3541,7 @@ function renderReports(el){
 function buildReportBody(type, range){
   let body = reportLetterhead(REPORT_TYPES[type], range);
   if(type==='vehicles'){
-    const vs = DB.vehicles.filter(v=>inRange(v.createdAt.slice(0,10), range));
+    const vs = DB.vehicles.filter(v=>inRange(vehicleEffectiveDate(v), range));
     body += `<table><thead><tr><th>Namba</th><th>Mmiliki</th><th>Kitengo</th><th>Hali</th><th>Malipo</th><th>Fundi</th></tr></thead><tbody>
       ${vs.map(v=>`<tr><td>${esc(v.regNo)}</td><td>${esc(v.owner)}</td><td>${UNIT_LABELS[v.unit]}</td><td>${STATUS_LABELS[v.status].label}</td><td>${v.paid?'Imelipiwa':'Bado'}</td><td>${esc(staffNames(v.technicianIds))}</td></tr>`).join('') || `<tr><td colspan="6">Hakuna data</td></tr>`}
       </tbody></table>
@@ -3532,7 +3590,7 @@ function buildReportBody(type, range){
       <div style="margin-top:14px;font-weight:800;font-size:16px;">JUMLA YA MAKUSANYO YOTE: ${fmtMoney(c.total)}</div>`;
   }
   else if(type==='allservices'){
-    const vs = DB.vehicles.filter(v=>inRange(v.createdAt.slice(0,10), range));
+    const vs = DB.vehicles.filter(v=>inRange(vehicleEffectiveDate(v), range));
     const ukaguzi = vs.filter(v=>v.unit==='ukaguzi');
     const matengenezo = vs.filter(v=>v.unit==='matengenezo');
     const madogo = matengenezo.filter(v=>maintSizeClass(v.totalCost)==='madogo');
@@ -3542,7 +3600,7 @@ function buildReportBody(type, range){
     const rw = DB.roadworthiness.filter(r=>inRange(r.date, range));
     const bo = DB.boardingOff.filter(b=>inRange(b.date, range));
     const pk = DB.parkingFees.filter(p=>inRange(p.date, range));
-    const mf = DB.mifumoJobs.filter(j=>inRange(j.createdAt.slice(0,10), range));
+    const mf = DB.mifumoJobs.filter(j=>inRange(mifumoEffectiveDate(j), range));
     body += `<table><thead><tr><th>Aina ya Kazi</th><th>Idadi</th></tr></thead><tbody>
       <tr><td>UKAGUZI (Inspections)</td><td>${ukaguzi.length}</td></tr>
       <tr><td>Matengenezo Madogo</td><td>${madogo.length}</td></tr>
@@ -3562,7 +3620,7 @@ function buildReportBody(type, range){
   }
   else if(type==='maint_madogo' || type==='maint_makubwa' || type==='maint_yote'){
     const wantCls = type==='maint_madogo' ? 'madogo' : type==='maint_makubwa' ? 'makubwa' : null;
-    const vs = DB.vehicles.filter(v=>v.unit==='matengenezo' && inRange(v.createdAt.slice(0,10), range))
+    const vs = DB.vehicles.filter(v=>v.unit==='matengenezo' && inRange(vehicleEffectiveDate(v), range))
       .filter(v=> wantCls ? maintSizeClass(v.totalCost)===wantCls : true);
     const totalCost = vs.reduce((a,v)=>a+Number(v.totalCost||0),0);
     body += `<table><thead><tr><th>Namba</th><th>Mmiliki</th><th>Aina</th><th>Gharama</th><th>Hali</th><th>Fundi</th></tr></thead><tbody>
@@ -3595,7 +3653,7 @@ function buildReportBody(type, range){
       </tbody></table><div style="margin-top:12px;font-weight:800;">JUMLA: ${fmtMoney(total)}</div>`;
   }
   else if(type==='mifumo'){
-    const list = DB.mifumoJobs.filter(j=>inRange(j.createdAt.slice(0,10), range));
+    const list = DB.mifumoJobs.filter(j=>inRange(mifumoEffectiveDate(j), range));
     const totalCost = list.reduce((a,j)=>a+Number(j.totalCost||0),0);
     const totalPaid = list.reduce((a,j)=>a+mifumoJobPaidTotal(j.id),0);
     body += `<table><thead><tr><th>Aina</th><th>Eneo/Mteja</th><th>Hali</th><th>Gharama</th><th>Kimelipwa</th><th>Fundi</th></tr></thead><tbody>
