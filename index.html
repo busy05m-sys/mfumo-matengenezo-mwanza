@@ -4895,6 +4895,10 @@ function renderUsers(el){
 function openUserForm(id){
   const u = id ? DB.users.find(x=>x.id===id) : null;
   const presetKeys = Object.keys(ROLE_PRESETS);
+  // Wadhifa zilizopo kwa Wafanyakazi (ikiwemo zile alizoongeza mwenyewe kupitia "➕ Nyingine" kule Wafanyakazi) -
+  // zinaonekana hapa pia ili tusizirudie kuandika, lakini bila kubadilisha ruhusa kiotomatiki.
+  const staffRoles = [...new Set(DB.staff.map(s=>s.role).filter(r=>r && !presetKeys.includes(r)))].sort();
+  const currentRoleIsKnown = u && (presetKeys.includes(u.role) || staffRoles.includes(u.role));
   openModal(`
     <div class="modal-head"><h3>${u?'Hariri':'Ongeza'} Mtumiaji</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
@@ -4906,10 +4910,19 @@ function openUserForm(id){
       <div class="form-row">
         <div class="field"><label>${u?'Nenosiri Jipya (acha wazi kutobadilisha)':'Nenosiri *'}</label><input id="uf_password" type="password"></div>
         <div class="field"><label>Wadhifa / Kundi la Ruhusa</label>
-          <select id="uf_rolePreset" onchange="applyRolePreset(this.value)">
-            ${presetKeys.map(k=>`<option value="${k}" ${u&&u.role===k?'selected':''}>${k}</option>`).join('')}
+          <select id="uf_rolePreset" onchange="onUserRolePresetChange(this.value)">
+            <optgroup label="Makundi ya Ruhusa (huweka ruhusa kiotomatiki)">
+              ${presetKeys.map(k=>`<option value="${esc(k)}" ${u&&u.role===k?'selected':''}>${k}</option>`).join('')}
+            </optgroup>
+            ${staffRoles.length? `<optgroup label="Wadhifa wa Wafanyakazi (jina tu — chagua ruhusa mwenyewe chini)">
+              ${staffRoles.map(r=>`<option value="${esc(r)}" ${u&&u.role===r?'selected':''}>${esc(r)}</option>`).join('')}
+            </optgroup>` : ''}
+            <option value="${CUSTOM_ROLE_OPTION}" ${u&&!currentRoleIsKnown?'selected':''}>➕ Nyingine (Andika Wadhifa Mwenyewe)</option>
           </select>
         </div>
+      </div>
+      <div class="field" id="uf_customRoleBox" style="display:${u&&!currentRoleIsKnown?'block':'none'};">
+        <label>Andika Wadhifa Mpya *</label><input id="uf_customRole" value="${u&&!currentRoleIsKnown?esc(u.role):''}" placeholder="mf. Mhandisi wa Mitambo">
       </div>
       <div class="field">
         <label>Sehemu Anazoruhusiwa Kuona <span class="opt">— chagua zote zinazomhusu</span></label>
@@ -4943,6 +4956,12 @@ function openUserForm(id){
     <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveUser('${id||''}')">Hifadhi</button></div>
   `);
 }
+/** Ukichagua "Kundi la Ruhusa" rasmi, ruhusa zinawekwa kiotomatiki (kama zamani). Ukichagua wadhifa wa
+ *  mfanyakazi (usio na kundi la ruhusa) au "Nyingine", ruhusa HAZIGUSWI — Msimamizi anachagua mwenyewe. */
+function onUserRolePresetChange(val){
+  document.getElementById('uf_customRoleBox').style.display = (val===CUSTOM_ROLE_OPTION) ? 'block' : 'none';
+  if(ROLE_PRESETS[val]) applyRolePreset(val);
+}
 function applyRolePreset(key){
   const preset = ROLE_PRESETS[key];
   if(!preset) return;
@@ -4971,7 +4990,12 @@ async function saveUser(id){
   const isAdmin = document.getElementById('uf_isAdmin').checked;
   const canEdit = isAdmin || document.getElementById('uf_canEdit').checked;
   const canDelete = isAdmin || document.getElementById('uf_canDelete').checked;
-  const role = document.getElementById('uf_rolePreset').value;
+  let role = document.getElementById('uf_rolePreset').value;
+  if(role === CUSTOM_ROLE_OPTION){
+    const customRole = document.getElementById('uf_customRole').value.trim();
+    if(!customRole){ toast("Andika jina la wadhifa mpya","red"); return; }
+    role = customRole;
+  }
   const data = { fullName, username, role, allowedModules, isAdmin, canEdit, canDelete };
   if(id){
     const u = DB.users.find(x=>x.id===id);
