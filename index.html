@@ -204,6 +204,8 @@ a.linklike{color:var(--navy-2);font-weight:700;cursor:pointer;}
   .view.print-active{display:block !important;}
   .card{box-shadow:none;border:1px solid #ccc;}
 }
+@keyframes blinkAlert{ 0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.35);} 50%{box-shadow:0 0 0 8px rgba(220,38,38,0);} }
+.blink-alert{ animation: blinkAlert 1.4s infinite; }
 </style>
 </head>
 <body>
@@ -289,8 +291,13 @@ function defaultDB(){
     mifumoPayments: [],      // Malipo kwa kazi za MIFUMO
     vehicleRegistry: [],     // Daftari la magari: {id, regNo, owner, driverName, driverPhone} — hifadhi ya kudumu, tumika tena bila kuandika upya
     mifumoLocations: [],     // Daftari la maeneo/wateja wa MIFUMO — hifadhi ya kudumu, tumika tena bila kuandika upya
-    users: [],                 // Akaunti za watumiaji: {id, username, passwordHash, fullName, role, allowedModules[], isAdmin, active, createdAt}
-    stockLevels: []            // Kiwango cha chini cha vipuri: {id, partName, minQty, createdAt}
+    users: [],                 // Akaunti za watumiaji: {id, username, passwordHash, fullName, role, allowedModules[], isAdmin, canEdit, canDelete, active, createdAt}
+    stockLevels: [],           // Kiwango cha chini cha vipuri: {id, partName, minQty, createdAt}
+    allowances: [],            // Posho: {id, staffId, type('lunch'|'transport'|'night'|'transitfare'|'ontransit'), amount, date, note, createdAt}
+    expenditures: [],          // Matumizi: {id, category('office_consumables'|'materials'|'workshop_repair'|'tools_equipment'|'other'), description, amount, date, note, createdAt}
+    staffWarnings: [],         // Maonyo kwa mtumishi: {id, staffId, date, reason, issuedBy, createdAt}
+    staffEvaluations: [],      // Tathmini/KPI ya kila mwezi: {id, staffId, month, attendance, quality, discipline, teamwork, output, comments, evaluatedBy, createdAt}
+    appointments: []           // Vikao/Ratiba za Meneja: {id, title, date, time, location, note, createdAt}
   };
 }
 
@@ -357,6 +364,16 @@ function migrateDB(d){
     });
   }
   d.mifumoJobs.forEach(j=>{ if(!j.unit) j.unit = 'matengenezo'; });
+  // Default posho (allowance) figures kwa kila mtumishi - flexible, yanaweza kubadilishwa kwa mtu mmoja mmoja
+  d.staff.forEach(s=>{
+    if(s.lunchAllowanceDefault===undefined) s.lunchAllowanceDefault = 250000;
+    if(s.transportAllowanceDefault===undefined) s.transportAllowanceDefault = 120000;
+  });
+  // Ruhusa mpya za Kuhariri/Kufuta - default HAPANA kwa watumiaji wa kawaida, Admin ana ruhusa zote moja kwa moja
+  d.users.forEach(u=>{
+    if(u.canEdit===undefined) u.canEdit = !!u.isAdmin;
+    if(u.canDelete===undefined) u.canDelete = !!u.isAdmin;
+  });
   // Old spare-parts records only had vehicleId + cost + status — upgrade them to the fuller INVENTORY shape.
   d.spareParts.forEach(p=>{
     if(!p.jobRefType){ p.jobRefType = 'vehicle'; p.jobRefId = p.vehicleId || p.jobRefId || null; }
@@ -707,9 +724,12 @@ const NAV = [
   {group:"Watumishi", items:[
     {id:"staff", label:"Wafanyakazi Wote", ic:"👥"},
     {id:"performance", label:"Utendaji & Mafundi Bora", ic:"🏆"},
+    {id:"allowances", label:"Posho (Allowances)", ic:"💵"},
   ]},
   {group:"Fedha", items:[
     {id:"finance", label:"Mapato & Malipo", ic:"💰"},
+    {id:"expenditures", label:"Matumizi (Expenditures)", ic:"🧾"},
+    {id:"profitloss", label:"Faida / Hasara", ic:"📈"},
   ]},
   {group:"Madereva", items:[
     {id:"feedback", label:"MAONI", ic:"💬"},
@@ -725,6 +745,7 @@ const NAV = [
     {id:"reports", label:"Ripoti Zinazochapishwa", ic:"🖨️"},
   ]},
   {group:"Usimamizi", items:[
+    {id:"appointments", label:"Vikao & Ratiba za Meneja", ic:"📅"},
     {id:"users", label:"Watumiaji & Ruhusa", ic:"🔑"},
   ]},
 ];
@@ -737,6 +758,9 @@ const PAGE_META = {
   staff:["Wafanyakazi","Watumishi wote wa TEMESA Mkoa wa Mwanza kwa vitengo"],
   performance:["Utendaji wa Wafanyakazi","Bajeti, asilimia ya utendaji na mafundi bora"],
   finance:["Mapato & Malipo","Kiasi kilicholipwa na mapato kwa kipindi"],
+  allowances:["Posho (Allowances)","Toa na fuatilia posho za wafanyakazi"],
+  expenditures:["Matumizi (Expenditures)","Rekodi matumizi ya ofisi, vifaa na ukarabati"],
+  profitloss:["Faida / Hasara","Linganisha mapato na matumizi kwa kipindi"],
   feedback:["MAONI","Ufuatiliaji wa hali baada ya huduma — magari na MIFUMO (After-service follow up)"],
   valuation:["Uthamini wa Gari (Valuation)","Tengeneza na chapisha ripoti ya uthamini wa gari"],
   tradetest:["Trade Test Certificate","Pima madereva na chapisha cheti cha mtihani wa udereva"],
@@ -745,14 +769,15 @@ const PAGE_META = {
   boardingoff:["Boarding Off Report","Tengeneza na chapisha ripoti ya kuondoa gari kwenye matumizi"],
   reports:["Ripoti","Chagua ripoti na uichapishe"],
   users:["Watumiaji & Ruhusa","Simamia akaunti za watumiaji na wanachoweza kuona/kufanya"],
+  appointments:["Vikao & Ratiba za Meneja","Panga na fuatilia vikao na ratiba za nje"],
 };
 
 /* ---------------------------- ACCOUNTS / PERMISSIONS ---------------------------- */
 const ALL_MODULES = NAV.flatMap(g=>g.items).filter(i=>i.id!=='users');
 const ROLE_PRESETS = {
   "Msimamizi (Full Access)": {isAdmin:true, modules: ALL_MODULES.map(m=>m.id)},
-  "Meneja wa Mkoa": {isAdmin:false, modules: ['dashboard','vehicles','mifumo','staff','performance','finance','reports','feedback','valuation','tradetest','parkingfees','roadworthiness','boardingoff']},
-  "Mhasibu": {isAdmin:false, modules: ['dashboard','finance','reports','parkingfees']},
+  "Meneja wa Mkoa": {isAdmin:false, modules: ['dashboard','vehicles','mifumo','staff','performance','allowances','finance','expenditures','profitloss','reports','feedback','valuation','tradetest','parkingfees','roadworthiness','boardingoff','appointments']},
+  "Mhasibu": {isAdmin:false, modules: ['dashboard','finance','expenditures','profitloss','allowances','reports','parkingfees']},
   "Mgavi": {isAdmin:false, modules: ['dashboard','parts','consumables']},
   "Fundi wa Ukaguzi": {isAdmin:false, modules: ['dashboard','vehicles','roadworthiness','feedback']},
   "Fundi wa Matengenezo": {isAdmin:false, modules: ['dashboard','vehicles','parts','consumables','feedback']},
@@ -764,6 +789,14 @@ const ROLE_PRESETS = {
 let currentUser = null;
 let emergencyMode = false;
 function hasModuleAccess(moduleId){ return currentUser && (currentUser.isAdmin || (currentUser.allowedModules||[]).includes(moduleId)); }
+/** Ruhusa mpya: kwa default HAKUNA anayeweza kufuta au kuhariri taarifa za msingi (wafanyakazi, watumiaji,
+ *  fedha) isipokuwa apewe ruhusa maalum na Msimamizi, au awe Admin mwenyewe. Kumbuka: hii haizuii mafundi/
+ *  watumiaji wa kawaida kuendelea kusasisha maendeleo ya kazi zao za kila siku (mfano hali ya gari, KM,
+ *  saa za kazi) - hilo bado linahitaji tu ufikiaji wa module husika kama ilivyokuwa awali. */
+function canDeleteNow(){ return !!(currentUser && (currentUser.isAdmin || currentUser.canDelete)); }
+function canEditNow(){ return !!(currentUser && (currentUser.isAdmin || currentUser.canEdit)); }
+function requireDelete(){ if(!canDeleteNow()){ toast("Huna ruhusa ya kufuta taarifa. Wasiliana na Msimamizi wa mfumo.","red"); return false; } return true; }
+function requireEdit(){ if(!canEditNow()){ toast("Huna ruhusa ya kuhariri taarifa hii. Wasiliana na Msimamizi wa mfumo.","red"); return false; } return true; }
 /** Robust check for the Regional Manager role — trims and ignores case so a stray space or typo when the
  *  role was typed/selected doesn't silently break his scoped-budget performance calculation. */
 function isRegionalManagerRole(role){
@@ -865,7 +898,10 @@ function render(){
     consumables: renderConsumables,
     staff: renderStaff,
     performance: renderPerformance,
+    allowances: renderAllowances,
     finance: renderFinance,
+    expenditures: renderExpenditures,
+    profitloss: renderProfitLoss,
     feedback: renderFeedback,
     valuation: renderValuation,
     tradetest: renderTradeTest,
@@ -874,6 +910,7 @@ function render(){
     boardingoff: renderBoardingOff,
     reports: renderReports,
     users: renderUsers,
+    appointments: renderAppointments,
   }[currentView];
   const content = document.getElementById('content');
   let el = document.getElementById('view_'+currentView);
@@ -942,6 +979,7 @@ function renderDashboard(el){
   const mifumoJobsDone = DB.mifumoJobs.filter(j=>j.status==='imekamilika').length;
 
   el.innerHTML = `
+  ${renderAppointmentReminders()}
   <div class="grid grid-4" style="margin-bottom:20px;">
     <div class="card stat blue"><div class="stat-bar"></div>
       <div class="stat-label">Jumla ya Magari</div><div class="stat-value">${totalVehicles}</div>
@@ -995,19 +1033,34 @@ function renderDashboard(el){
     </div>
   </div>
 
-  <div class="grid grid-2">
-    <div class="card">
-      <div class="card-head"><h3>🚦 Ubao wa Hali ya Magari (Live Board)</h3><span class="hint">${vs.length} magari</span></div>
-      <div class="table-wrap">
-        <table><thead><tr><th>Namba</th><th>Kitengo</th><th>Hali</th><th>Fundi</th></tr></thead>
-        <tbody>
-        ${vs.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,8).map(v=>`
-          <tr><td class="mono">${esc(v.regNo)}</td><td><span class="badge ${v.unit==='ukaguzi'?'blue':'amber'} dot">${UNIT_LABELS[v.unit]}</span></td>
-          <td><span class="badge ${STATUS_LABELS[v.status].cls} dot">${STATUS_LABELS[v.status].label}</span></td>
-          <td>${esc(staffNames(v.technicianIds))}</td></tr>`).join('') || `<tr><td colspan="4" class="empty">Hakuna gari bado</td></tr>`}
-        </tbody></table>
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-head"><h3>🚦 Ubao wa Hali ya Magari (Live Board)</h3><span class="hint">${vs.length} magari yote</span></div>
+    <div class="card-pad">
+      <div class="grid grid-4" style="gap:12px;">
+        ${Object.keys(STATUS_LABELS).map(statusKey=>{
+          const label = STATUS_LABELS[statusKey];
+          const group = vs.filter(v=>v.status===statusKey).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+          const colorMap = {gray:'#9aa4ae', blue:'#3b82f6', amber:'#f59e0b', green:'#22c55e'};
+          const bgMap = {gray:'#F3F4F6', blue:'#EAF2FE', amber:'#FEF6E8', green:'#E9F9EF'};
+          return `<div style="background:${bgMap[label.cls]};border:1px solid ${colorMap[label.cls]}44;border-radius:12px;padding:12px;min-height:220px;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+              <span style="font-weight:800;color:${colorMap[label.cls]};font-size:13px;text-transform:uppercase;letter-spacing:.3px;">${label.label}</span>
+              <span style="background:${colorMap[label.cls]};color:#fff;font-weight:800;border-radius:20px;padding:2px 10px;font-size:13px;">${group.length}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;max-height:280px;">
+              ${group.slice(0,6).map(v=>`<div onclick="currentView='vehicles';render();setTimeout(()=>openVehicleDetail('${v.id}'),50);" style="cursor:pointer;background:#fff;border-radius:8px;padding:7px 9px;box-shadow:0 1px 3px rgba(0,0,0,.06);">
+                <div style="font-weight:700;font-size:13px;font-family:monospace;">${esc(v.regNo)}</div>
+                <div style="font-size:11px;color:var(--slate);">${UNIT_LABELS[v.unit]} · ${esc(staffNames(v.technicianIds))}</div>
+              </div>`).join('') || `<div class="small" style="text-align:center;padding:20px 0;color:var(--slate);">Hakuna gari</div>`}
+              ${group.length>6 ? `<div class="small" style="text-align:center;color:var(--slate);">+ ${group.length-6} nyingine</div>` : ''}
+            </div>
+          </div>`;
+        }).join('')}
       </div>
     </div>
+  </div>
+
+  <div class="grid grid-2">
     <div class="card">
       <div class="card-head"><h3>⏳ Vipuri Vinavyosubiriwa</h3><span class="hint">${waitingPartsList.length} vipuri</span></div>
       <div class="table-wrap">
@@ -1018,8 +1071,40 @@ function renderDashboard(el){
         </tbody></table>
       </div>
     </div>
+    <div class="card">
+      <div class="card-head"><h3>📈 Muhtasari wa Fedha (Mwezi Huu)</h3></div>
+      <div class="card-pad">
+        ${(()=>{ const r=totalRevenueFor('month'); const c=totalExpenditureFor('month'); const p=r.total-c.total;
+          return `<div class="grid grid-2">
+            <div><div class="small">Mapato</div><div style="font-size:17px;font-weight:800;color:var(--green);">${fmtMoney(r.total)}</div></div>
+            <div><div class="small">Matumizi</div><div style="font-size:17px;font-weight:800;color:var(--red);">${fmtMoney(c.total)}</div></div>
+          </div>
+          <div class="divider"></div>
+          <div class="small">${p>=0?'✅ FAIDA':'⚠️ HASARA'}</div><div style="font-size:20px;font-weight:800;color:${p>=0?'var(--green)':'var(--red)'};">${fmtMoney(Math.abs(p))}</div>`;
+        })()}
+      </div>
+    </div>
   </div>
   `;
+}
+/** Vikao/ratiba za siku 3 zijazo (au zilizopita bila kufutwa) - zinang'aa (blink) kumkumbusha Meneja. */
+function renderAppointmentReminders(){
+  const now = new Date();
+  const soon = DB.appointments.filter(a=>{
+    const d = new Date(a.date + 'T' + (a.time||'00:00'));
+    const diffDays = (d - now) / (1000*60*60*24);
+    return diffDays >= -1 && diffDays <= 3; // jana mpaka siku 3 zijazo
+  }).sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time));
+  if(soon.length===0) return '';
+  return `<div class="card blink-alert" style="margin-bottom:16px;border:2px solid var(--red);background:#FFF7F5;">
+    <div class="card-head" style="border:none;"><h3 style="color:var(--red);">🔔 Ukumbusho: Vikao na Ratiba za Karibuni</h3></div>
+    <div class="card-pad" style="padding-top:0;">
+      ${soon.map(a=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);">
+        <div><b>${esc(a.title)}</b> <span class="small">— ${esc(a.location||'')}</span></div>
+        <div class="small" style="font-weight:700;">${esc(a.date)} ${esc(a.time||'')}</div>
+      </div>`).join('')}
+    </div>
+  </div>`;
 }
 
 /* ============================== VEHICLES ============================== */
@@ -1316,7 +1401,7 @@ function openVehicleDetail(id){
       <button class="btn ghost sm" onclick="closeModal(); vehicleFilter.q=''; goFeedbackFor('vehicle','${id}')">💬 Ona / Ongeza Maoni kwa gari hili</button>
     </div>
     <div class="modal-foot">
-      <button class="btn red" onclick="deleteVehicle('${id}')">Futa Gari</button>
+      ${canDeleteNow()?`<button class="btn red" onclick="deleteVehicle('${id}')">Futa Gari</button>`:''}
       <button class="btn secondary" onclick="closeModal()">Funga</button>
       <button class="btn amber" onclick="saveVehicleDetail('${id}')">Hifadhi Mabadiliko</button>
     </div>
@@ -1411,6 +1496,7 @@ function saveVehicleDetail(id){
 }
 
 function deleteVehicle(id){
+  if(!requireDelete()) return;
   if(!confirm("Una uhakika unataka kufuta gari hili? Vipuri na malipo yake pia yatafutika.")) return;
   DB.vehicles = DB.vehicles.filter(v=>v.id!==id);
   DB.spareParts = DB.spareParts.filter(p=>!(p.jobRefType==='vehicle' && p.jobRefId===id));
@@ -1649,7 +1735,7 @@ function openMifumoDetail(id){
       </div>
     </div>
     <div class="modal-foot">
-      <button class="btn red" onclick="deleteMifumo('${id}')">Futa Kazi</button>
+      ${canDeleteNow()?`<button class="btn red" onclick="deleteMifumo('${id}')">Futa Kazi</button>`:''}
       <button class="btn secondary" onclick="closeModal()">Funga</button>
       <button class="btn amber" onclick="saveMifumoDetail('${id}')">Hifadhi Mabadiliko</button>
     </div>
@@ -1713,6 +1799,7 @@ function saveMifumoDetail(id){
   renderMifumo(document.getElementById('view_mifumo'));
 }
 function deleteMifumo(id){
+  if(!requireDelete()) return;
   if(!confirm("Una uhakika unataka kufuta kazi hii?")) return;
   DB.mifumoJobs = DB.mifumoJobs.filter(j=>j.id!==id);
   DB.mifumoPayments = DB.mifumoPayments.filter(p=>p.jobId!==id);
@@ -2127,7 +2214,7 @@ function openInventoryDetail(id){
       <div class="field"><label>Sababu ya Kurudisha</label><input id="id_returnReason" value="${esc(o.returnReason||'')}" placeholder="mf. Kimeharibika, si sahihi, kubovu..."></div>
     </div>
     <div class="modal-foot">
-      <button class="btn red" onclick="deleteInventoryOrder('${id}')">Futa</button>
+      ${canDeleteNow()?`<button class="btn red" onclick="deleteInventoryOrder('${id}')">Futa</button>`:''}
       <button class="btn secondary" onclick="closeModal()">Funga</button>
       <button class="btn amber" onclick="saveInventoryDetail('${id}')">Hifadhi</button>
     </div>
@@ -2152,6 +2239,7 @@ function saveInventoryDetail(id){
   renderParts(document.getElementById('view_parts'));
 }
 function deleteInventoryOrder(id){
+  if(!requireDelete()) return;
   if(!confirm("Una uhakika unataka kufuta rekodi hii ya kipuri?")) return;
   DB.spareParts = DB.spareParts.filter(o=>o.id!==id);
   saveDB(); closeModal(); toast("Kimefutwa","green");
@@ -2227,7 +2315,7 @@ function renderStaff(el){
           ? (s.vehicleBudget||s.mifumoBudget ? `Magari: ${fmtMoney(s.vehicleBudget||0)}<br>MIFUMO: ${fmtMoney(s.mifumoBudget||0)}<br><b>Jumla: ${fmtMoney((s.vehicleBudget||0)+(s.mifumoBudget||0))}</b>` : '<span class="small">Haijawekwa</span>')
           : (s.annualBudget?fmtMoney(s.annualBudget):'<span class="small">Haijawekwa</span>');
         return `<tr><td style="font-weight:700;">${esc(s.name)}</td><td>${esc(s.role)}</td><td>${esc(s.phone||'—')}</td><td class="small">${budgetDisplay}</td>
-        <td style="text-align:right;"><button class="btn ghost sm" onclick="openStaffForm('${s.id}')">Hariri</button> <button class="btn ghost sm" onclick="deleteStaff('${s.id}')">Futa</button></td></tr>`;
+        <td style="text-align:right;"><button class="btn ghost sm" onclick="openStaffProfile('${s.id}')">👁️ Profaili</button> ${canEditNow()?`<button class="btn ghost sm" onclick="openStaffForm('${s.id}')">Hariri</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteStaff('${s.id}')">Futa</button>`:''}</td></tr>`;
       }).join('') || `<tr><td colspan="5" class="empty">Hakuna mfanyakazi bado kwenye kitengo hiki</td></tr>`}</tbody></table></div>
     </div>`;
   }).join('')}
@@ -2243,6 +2331,23 @@ function openStaffForm(id){
         <div class="field"><label>Namba ya Simu</label><input id="st_phone" value="${s?esc(s.phone||''):''}"></div>
       </div>
       <div class="form-row">
+        <div class="field"><label>Namba ya Ajira (Employee No.)</label><input id="st_empNo" value="${s?esc(s.employeeNumber||''):''}"></div>
+        <div class="field"><label>Namba ya Kitambulisho (NIDA)</label><input id="st_nida" value="${s?esc(s.nationalId||''):''}"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Tarehe ya Kuzaliwa</label><input id="st_dob" type="date" value="${s?esc(s.dob||''):''}"></div>
+        <div class="field"><label>Tarehe ya Kuajiriwa</label><input id="st_dateEmployed" type="date" value="${s?esc(s.dateEmployed||''):''}"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Anwani/Makazi</label><input id="st_address" value="${s?esc(s.address||''):''}"></div>
+        <div class="field"><label>Mtu wa Kuwasiliana Naye Dharura (Jina & Simu)</label><input id="st_emergency" value="${s?esc(s.emergencyContact||''):''}" placeholder="mf. Amina - 0712xxxxxx"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Posho ya Chakula (Lunch) - Kila Tarehe 15 (TSh)</label><input id="st_lunchDefault" type="number" value="${s?(s.lunchAllowanceDefault!==undefined?s.lunchAllowanceDefault:250000):250000}"></div>
+        <div class="field"><label>Posho ya Usafiri (Transport) - Kila Tarehe 15 (TSh)</label><input id="st_transportDefault" type="number" value="${s?(s.transportAllowanceDefault!==undefined?s.transportAllowanceDefault:120000):120000}"></div>
+      </div>
+      <span class="opt">Hizi ni kiasi cha "default" tu — vinaweza kubadilishwa kwa mtu mmoja mmoja wakati wa kutoa posho za mwezi.</span>
+      <div class="form-row" style="margin-top:10px;">
         <div class="field"><label>Kitengo *</label>
           <select id="st_dept" onchange="fillRoleOptions(this.value, '${s?esc(s.role):''}')">
             ${Object.keys(DEPTS).map(k=>`<option value="${k}" ${s&&s.dept===k?'selected':''}>${DEPTS[k]}</option>`).join('')}
@@ -2312,6 +2417,7 @@ function updateManagerTotalBudget(){
   document.getElementById('st_managerTotalPreview').innerHTML = `Jumla ya bajeti ya mwaka (Magari + MIFUMO): <b>${fmtMoney(v+m)}</b>`;
 }
 function saveStaff(id){
+  if(id && !requireEdit()) return;
   const name = document.getElementById('st_name').value.trim();
   if(!name){ toast("Andika jina la mfanyakazi","red"); return; }
   const dept = document.getElementById('st_dept').value;
@@ -2327,6 +2433,14 @@ function saveStaff(id){
   const mifumoBudget = isManager ? (Number(document.getElementById('st_mifumoBudget').value)||0) : 0;
   const data = {
     name, phone: document.getElementById('st_phone').value.trim(),
+    employeeNumber: document.getElementById('st_empNo').value.trim(),
+    nationalId: document.getElementById('st_nida').value.trim(),
+    dob: document.getElementById('st_dob').value,
+    dateEmployed: document.getElementById('st_dateEmployed').value,
+    address: document.getElementById('st_address').value.trim(),
+    emergencyContact: document.getElementById('st_emergency').value.trim(),
+    lunchAllowanceDefault: Number(document.getElementById('st_lunchDefault').value)||0,
+    transportAllowanceDefault: Number(document.getElementById('st_transportDefault').value)||0,
     dept, role,
     annualBudget: isManager ? (vehicleBudget+mifumoBudget) : (Number(document.getElementById('st_budget').value)||0),
     vehicleBudget, mifumoBudget
@@ -2340,9 +2454,431 @@ function saveStaff(id){
   renderStaff(document.getElementById('view_staff'));
 }
 function deleteStaff(id){
+  if(!requireDelete()) return;
   if(!confirm("Una uhakika unataka kufuta mfanyakazi huyu?")) return;
   DB.staff = DB.staff.filter(s=>s.id!==id); saveDB(); toast("Mfanyakazi amefutwa","green");
   renderStaff(document.getElementById('view_staff'));
+}
+
+/* ============================== POSHO (ALLOWANCES) ============================== */
+const ALLOWANCE_TYPES = {
+  lunch: "Posho ya Chakula (Lunch)",
+  transport: "Posho ya Usafiri (Transport) - Kila Mwezi",
+  night: "Night Allowance (Perdiem)",
+  transitfare: "Transport Fare (Nauli ya Safari)",
+  ontransit: "On Transit Allowance (Half Perdiem)"
+};
+let allowanceFilterMonth = todayISO().slice(0,7); // YYYY-MM
+function renderAllowances(el){
+  const [fy, fm] = allowanceFilterMonth.split('-').map(Number);
+  const monthRecords = DB.allowances.filter(a=> (a.date||'').slice(0,7)===allowanceFilterMonth)
+    .sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  const totalMonth = monthRecords.reduce((s,a)=>s+Number(a.amount||0),0);
+  el.innerHTML = `
+  <div class="flex-between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+    <div class="field" style="margin:0;"><label>Chagua Mwezi</label><input type="month" value="${allowanceFilterMonth}" onchange="allowanceFilterMonth=this.value;renderAllowances(document.getElementById('view_allowances'))"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn amber" onclick="openBulkAllowanceForm()">📅 Toa Posho za Lunch & Transport (Tarehe 15)</button>
+      <button class="btn secondary" onclick="openAllowanceForm()">➕ Ongeza Posho Nyingine (Night/Nauli/Transit)</button>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-head"><h3>Posho za Mwezi ${esc(allowanceFilterMonth)}</h3><span class="hint">Jumla: <b>${fmtMoney(totalMonth)}</b></span></div>
+    <div class="table-wrap"><table><thead><tr><th>Mfanyakazi</th><th>Aina</th><th>Tarehe</th><th>Kiasi</th><th>Maelezo</th><th></th></tr></thead>
+    <tbody>${monthRecords.map(a=>`<tr>
+      <td style="font-weight:700;">${esc(staffName(a.staffId))}</td>
+      <td>${ALLOWANCE_TYPES[a.type]||a.type}</td>
+      <td>${esc(a.date)}</td>
+      <td>${fmtMoney(a.amount)}</td>
+      <td class="small">${esc(a.note||'—')}</td>
+      <td style="text-align:right;">${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteAllowance('${a.id}')">Futa</button>`:''}</td>
+    </tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna posho zilizotolewa mwezi huu bado</td></tr>`}</tbody></table></div>
+  </div>`;
+}
+function openBulkAllowanceForm(){
+  const activeStaff = DB.staff;
+  openModal(`
+    <div class="modal-head"><h3>Toa Posho za Lunch & Transport - Tarehe 15</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="field"><label>Mwezi</label><input id="ba_month" type="month" value="${allowanceFilterMonth}"></div>
+      </div>
+      <span class="opt">Kiasi kimejazwa kiotomatiki kutoka kwenye taarifa za kila mfanyakazi (kinaweza kubadilishwa hapa chini kabla ya kuthibitisha).</span>
+      <div class="table-wrap" style="margin-top:10px;max-height:340px;overflow:auto;"><table><thead><tr><th>Mfanyakazi</th><th>Lunch (TSh)</th><th>Transport (TSh)</th></tr></thead>
+      <tbody>${activeStaff.map(s=>`<tr>
+        <td style="font-weight:700;">${esc(s.name)}</td>
+        <td><input type="number" id="ba_lunch_${s.id}" value="${s.lunchAllowanceDefault!==undefined?s.lunchAllowanceDefault:250000}" style="width:120px;"></td>
+        <td><input type="number" id="ba_transport_${s.id}" value="${s.transportAllowanceDefault!==undefined?s.transportAllowanceDefault:120000}" style="width:120px;"></td>
+      </tr>`).join('') || `<tr><td colspan="3" class="empty">Hakuna wafanyakazi bado</td></tr>`}</tbody></table></div>
+    </div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="confirmBulkAllowance()">Thibitisha na Toa Posho</button></div>
+  `);
+}
+function confirmBulkAllowance(){
+  const month = document.getElementById('ba_month').value;
+  if(!month){ toast("Chagua mwezi","red"); return; }
+  const date = month + '-15';
+  let count = 0;
+  DB.staff.forEach(s=>{
+    const lunchEl = document.getElementById('ba_lunch_'+s.id);
+    const transportEl = document.getElementById('ba_transport_'+s.id);
+    const lunch = lunchEl ? Number(lunchEl.value)||0 : 0;
+    const transport = transportEl ? Number(transportEl.value)||0 : 0;
+    if(lunch>0){ DB.allowances.push({id:uid('alw'), staffId:s.id, type:'lunch', amount:lunch, date, note:'Posho ya mwezi', createdAt:nowTime()}); count++; }
+    if(transport>0){ DB.allowances.push({id:uid('alw'), staffId:s.id, type:'transport', amount:transport, date, note:'Posho ya mwezi', createdAt:nowTime()}); count++; }
+  });
+  saveDB(); closeModal(); toast(`Posho ${count} zimetolewa kwa tarehe ${date}`,"green");
+  allowanceFilterMonth = month;
+  renderAllowances(document.getElementById('view_allowances'));
+}
+function openAllowanceForm(){
+  openModal(`
+    <div class="modal-head"><h3>Ongeza Posho</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="field"><label>Mfanyakazi *</label><select id="al_staff">${DB.staff.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('') || '<option value="">Hakuna wafanyakazi</option>'}</select></div>
+        <div class="field"><label>Aina ya Posho *</label><select id="al_type">
+          <option value="night">${ALLOWANCE_TYPES.night}</option>
+          <option value="transitfare">${ALLOWANCE_TYPES.transitfare}</option>
+          <option value="ontransit">${ALLOWANCE_TYPES.ontransit}</option>
+          <option value="lunch">${ALLOWANCE_TYPES.lunch}</option>
+          <option value="transport">${ALLOWANCE_TYPES.transport}</option>
+        </select></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Kiasi (TSh) *</label><input id="al_amount" type="number" placeholder="mf. 30000"></div>
+        <div class="field"><label>Tarehe *</label><input id="al_date" type="date" value="${todayISO()}"></div>
+      </div>
+      <div class="field"><label>Maelezo</label><input id="al_note" placeholder="mf. Safari ya kikazi Dar es Salaam"></div>
+    </div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveAllowance()">Hifadhi</button></div>
+  `);
+}
+function saveAllowance(){
+  const staffId = document.getElementById('al_staff').value;
+  const type = document.getElementById('al_type').value;
+  const amount = Number(document.getElementById('al_amount').value)||0;
+  const date = document.getElementById('al_date').value;
+  if(!staffId){ toast("Chagua mfanyakazi","red"); return; }
+  if(amount<=0){ toast("Weka kiasi sahihi","red"); return; }
+  if(!date){ toast("Weka tarehe","red"); return; }
+  DB.allowances.push({id:uid('alw'), staffId, type, amount, date, note:document.getElementById('al_note').value.trim(), createdAt:nowTime()});
+  saveDB(); closeModal(); toast("Posho imehifadhiwa","green");
+  allowanceFilterMonth = date.slice(0,7);
+  renderAllowances(document.getElementById('view_allowances'));
+}
+function deleteAllowance(id){
+  if(!requireDelete()) return;
+  if(!confirm("Una uhakika unataka kufuta posho hii?")) return;
+  DB.allowances = DB.allowances.filter(a=>a.id!==id);
+  saveDB(); toast("Posho imefutwa","green");
+  renderAllowances(document.getElementById('view_allowances'));
+}
+
+/* ============================== MATUMIZI (EXPENDITURES) ============================== */
+const EXPENDITURE_CATEGORIES = {
+  office_consumables: "Vitu vya Ofisi (Office Consumables)",
+  materials: "Materials",
+  workshop_repair: "Ukarabati Mdogo wa Workshop (Workshop Repair & Small Rehabilitation)",
+  tools_equipment: "Ununuzi wa Zana/Vifaa (Tools & Equipment)",
+  other: "Mengineyo"
+};
+let expenditureFilterRange = 'month';
+function renderExpenditures(el){
+  const records = DB.expenditures.filter(e=>inRange(e.date, expenditureFilterRange)).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const total = records.reduce((s,e)=>s+Number(e.amount||0),0);
+  const byCategory = {};
+  records.forEach(e=>{ byCategory[e.category] = (byCategory[e.category]||0) + Number(e.amount||0); });
+  el.innerHTML = `
+  <div class="flex-between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+    <div class="pill-tabs" style="margin-bottom:0;">
+      ${['day','week','month','quarter','half','year'].map(r=>`<div class="pill-tab ${expenditureFilterRange===r?'active':''}" onclick="expenditureFilterRange='${r}';renderExpenditures(document.getElementById('view_expenditures'))">${({day:'Leo',week:'Wiki',month:'Mwezi',quarter:'Robo Mwaka',half:'Nusu Mwaka',year:'Mwaka'})[r]}</div>`).join('')}
+    </div>
+    <button class="btn amber" onclick="openExpenditureForm()">➕ Ongeza Matumizi</button>
+  </div>
+  <div class="grid grid-4" style="margin-bottom:16px;">
+    ${Object.keys(EXPENDITURE_CATEGORIES).map((k,i)=>`<div class="card stat ${['blue','amber','red','green','blue'][i%5]}"><div class="stat-bar"></div>
+      <div class="stat-label">${EXPENDITURE_CATEGORIES[k]}</div><div class="stat-value" style="font-size:19px;">${fmtMoney(byCategory[k]||0)}</div></div>`).join('')}
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Matumizi Yote</h3><span class="hint">Jumla: <b>${fmtMoney(total)}</b></span></div>
+    <div class="table-wrap"><table><thead><tr><th>Tarehe</th><th>Aina</th><th>Maelezo</th><th>Kiasi</th><th></th></tr></thead>
+    <tbody>${records.map(e=>`<tr>
+      <td>${esc(e.date)}</td>
+      <td>${EXPENDITURE_CATEGORIES[e.category]||e.category}</td>
+      <td>${esc(e.description||'—')}</td>
+      <td>${fmtMoney(e.amount)}</td>
+      <td style="text-align:right;">${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteExpenditure('${e.id}')">Futa</button>`:''}</td>
+    </tr>`).join('') || `<tr><td colspan="5" class="empty">Hakuna matumizi yaliyorekodiwa kwa kipindi hiki</td></tr>`}</tbody></table></div>
+  </div>`;
+}
+function openExpenditureForm(){
+  openModal(`
+    <div class="modal-head"><h3>Ongeza Matumizi</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="field"><label>Aina ya Matumizi *</label><select id="ex_category">${Object.keys(EXPENDITURE_CATEGORIES).map(k=>`<option value="${k}">${EXPENDITURE_CATEGORIES[k]}</option>`).join('')}</select></div>
+        <div class="field"><label>Tarehe *</label><input id="ex_date" type="date" value="${todayISO()}"></div>
+      </div>
+      <div class="field"><label>Maelezo *</label><input id="ex_desc" placeholder="mf. Karatasi za printer, rangi ya workshop..."></div>
+      <div class="field"><label>Kiasi (TSh) *</label><input id="ex_amount" type="number" placeholder="mf. 150000"></div>
+    </div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveExpenditure()">Hifadhi</button></div>
+  `);
+}
+function saveExpenditure(){
+  const category = document.getElementById('ex_category').value;
+  const description = document.getElementById('ex_desc').value.trim();
+  const amount = Number(document.getElementById('ex_amount').value)||0;
+  const date = document.getElementById('ex_date').value;
+  if(!description){ toast("Andika maelezo ya matumizi","red"); return; }
+  if(amount<=0){ toast("Weka kiasi sahihi","red"); return; }
+  if(!date){ toast("Weka tarehe","red"); return; }
+  DB.expenditures.push({id:uid('exp'), category, description, amount, date, createdAt:nowTime()});
+  saveDB(); closeModal(); toast("Matumizi yamehifadhiwa","green");
+  renderExpenditures(document.getElementById('view_expenditures'));
+}
+function deleteExpenditure(id){
+  if(!requireDelete()) return;
+  if(!confirm("Una uhakika unataka kufuta rekodi hii ya matumizi?")) return;
+  DB.expenditures = DB.expenditures.filter(e=>e.id!==id);
+  saveDB(); toast("Matumizi yamefutwa","green");
+  renderExpenditures(document.getElementById('view_expenditures'));
+}
+
+/* ============================== FAIDA / HASARA (PROFIT & LOSS) ============================== */
+let plFilterRange = 'month';
+/** Jumla ya mapato: malipo ya magari + MIFUMO + ada za parking. */
+function totalRevenueFor(range){
+  const veh = DB.payments.filter(p=>inRange(p.date, range)).reduce((s,p)=>s+Number(p.amount||0),0);
+  const mif = DB.mifumoPayments.filter(p=>inRange(p.date, range)).reduce((s,p)=>s+Number(p.amount||0),0);
+  const park = DB.parkingFees.filter(p=>inRange(p.date, range)).reduce((s,p)=>s+Number(p.amount||0),0);
+  return {veh, mif, park, total: veh+mif+park};
+}
+/** Jumla ya matumizi: matumizi ya moja kwa moja + posho + vitu vya workshop + vipuri vilivyonunuliwa. */
+function totalExpenditureFor(range){
+  const exp = DB.expenditures.filter(e=>inRange(e.date, range)).reduce((s,e)=>s+Number(e.amount||0),0);
+  const alw = DB.allowances.filter(a=>inRange(a.date, range)).reduce((s,a)=>s+Number(a.amount||0),0);
+  const cons = DB.consumables.filter(c=>inRange(c.date, range)).reduce((s,c)=>s+Number(c.cost||0),0);
+  const parts = DB.spareParts.filter(p=>inRange(p.orderDate, range)).reduce((s,p)=>s+Number(p.unitCost||0)*Number(p.quantity||1),0);
+  return {exp, alw, cons, parts, total: exp+alw+cons+parts};
+}
+function renderProfitLoss(el){
+  const rev = totalRevenueFor(plFilterRange);
+  const cost = totalExpenditureFor(plFilterRange);
+  const profit = rev.total - cost.total;
+  el.innerHTML = `
+  <div class="pill-tabs" style="margin-bottom:16px;">
+    ${['day','week','month','quarter','half','year'].map(r=>`<div class="pill-tab ${plFilterRange===r?'active':''}" onclick="plFilterRange='${r}';renderProfitLoss(document.getElementById('view_profitloss'))">${({day:'Leo',week:'Wiki',month:'Mwezi',quarter:'Robo Mwaka',half:'Nusu Mwaka',year:'Mwaka'})[r]}</div>`).join('')}
+  </div>
+  <div class="card" style="margin-bottom:16px;background:${profit>=0?'linear-gradient(135deg,#0F5132,#146c43)':'linear-gradient(135deg,#842029,#b02a37)'};color:#fff;">
+    <div class="card-head" style="border:none;"><h3 style="color:#fff;">${profit>=0?'✅ FAIDA (PROFIT)':'⚠️ HASARA (LOSS)'}</h3></div>
+    <div style="padding:0 4px 10px;font-size:32px;font-weight:800;">${fmtMoney(Math.abs(profit))}</div>
+  </div>
+  <div class="grid-2" style="margin-bottom:16px;gap:16px;">
+    <div class="card">
+      <div class="card-head"><h3>💰 Mapato (Revenue)</h3></div>
+      <table style="width:100%;"><tbody>
+        <tr><td>Magari</td><td style="text-align:right;font-weight:700;">${fmtMoney(rev.veh)}</td></tr>
+        <tr><td>MIFUMO</td><td style="text-align:right;font-weight:700;">${fmtMoney(rev.mif)}</td></tr>
+        <tr><td>Ada za Parking</td><td style="text-align:right;font-weight:700;">${fmtMoney(rev.park)}</td></tr>
+        <tr style="border-top:2px solid var(--line);"><td style="font-weight:800;">JUMLA</td><td style="text-align:right;font-weight:800;color:var(--green);">${fmtMoney(rev.total)}</td></tr>
+      </tbody></table>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>🧾 Matumizi (Expenditure)</h3></div>
+      <table style="width:100%;"><tbody>
+        <tr><td>Matumizi ya Moja kwa Moja (Office/Materials/Workshop/Tools)</td><td style="text-align:right;font-weight:700;">${fmtMoney(cost.exp)}</td></tr>
+        <tr><td>Posho za Wafanyakazi</td><td style="text-align:right;font-weight:700;">${fmtMoney(cost.alw)}</td></tr>
+        <tr><td>Vitu vya Workshop</td><td style="text-align:right;font-weight:700;">${fmtMoney(cost.cons)}</td></tr>
+        <tr><td>Vipuri Vilivyonunuliwa</td><td style="text-align:right;font-weight:700;">${fmtMoney(cost.parts)}</td></tr>
+        <tr style="border-top:2px solid var(--line);"><td style="font-weight:800;">JUMLA</td><td style="text-align:right;font-weight:800;color:var(--red);">${fmtMoney(cost.total)}</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <span class="opt">Kumbuka: hesabu hii ni makadirio ya kifedha kwa kutumia taarifa zilizopo kwenye mfumo. Kwa hesabu rasmi ya kihasibu, linganisha na vitabu vya fedha vya idara ya Uhasibu.</span>
+  `;
+}
+
+/* ============================== VIKAO & RATIBA ZA MENEJA (APPOINTMENTS) ============================== */
+function renderAppointments(el){
+  const upcoming = DB.appointments.filter(a=>a.date>=todayISO()).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+  const past = DB.appointments.filter(a=>a.date<todayISO()).sort((a,b)=>(b.date+b.time).localeCompare(a.date+a.time));
+  el.innerHTML = `
+  <div class="flex-between" style="margin-bottom:14px;">
+    <h3 style="margin:0;">📅 Vikao & Ratiba za Nje</h3>
+    <button class="btn amber" onclick="openAppointmentForm()">➕ Ongeza Kikao/Ratiba</button>
+  </div>
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-head"><h3>Vinavyokuja</h3></div>
+    <div class="table-wrap"><table><thead><tr><th>Tarehe</th><th>Muda</th><th>Kichwa</th><th>Mahali</th><th>Maelezo</th><th></th></tr></thead>
+    <tbody>${upcoming.map(a=>`<tr>
+      <td>${esc(a.date)}</td><td>${esc(a.time||'—')}</td><td style="font-weight:700;">${esc(a.title)}</td>
+      <td>${esc(a.location||'—')}</td><td class="small">${esc(a.note||'—')}</td>
+      <td style="text-align:right;">${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteAppointment('${a.id}')">Futa</button>`:''}</td>
+    </tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna kikao/ratiba iliyopangwa</td></tr>`}</tbody></table></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Zilizopita</h3></div>
+    <div class="table-wrap"><table><thead><tr><th>Tarehe</th><th>Muda</th><th>Kichwa</th><th>Mahali</th><th></th></tr></thead>
+    <tbody>${past.slice(0,15).map(a=>`<tr>
+      <td>${esc(a.date)}</td><td>${esc(a.time||'—')}</td><td>${esc(a.title)}</td><td>${esc(a.location||'—')}</td>
+      <td style="text-align:right;">${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteAppointment('${a.id}')">Futa</button>`:''}</td>
+    </tr>`).join('') || `<tr><td colspan="5" class="empty">Hakuna historia bado</td></tr>`}</tbody></table></div>
+  </div>`;
+}
+function openAppointmentForm(){
+  openModal(`
+    <div class="modal-head"><h3>Ongeza Kikao/Ratiba</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Kichwa cha Habari *</label><input id="ap_title" placeholder="mf. Kikao na Katibu Tawala"></div>
+      <div class="form-row">
+        <div class="field"><label>Tarehe *</label><input id="ap_date" type="date" value="${todayISO()}"></div>
+        <div class="field"><label>Muda</label><input id="ap_time" type="time"></div>
+      </div>
+      <div class="field"><label>Mahali</label><input id="ap_location" placeholder="mf. Ofisi ya Mkuu wa Mkoa"></div>
+      <div class="field"><label>Maelezo Zaidi</label><textarea id="ap_note" rows="2"></textarea></div>
+    </div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveAppointment()">Hifadhi</button></div>
+  `);
+}
+function saveAppointment(){
+  const title = document.getElementById('ap_title').value.trim();
+  const date = document.getElementById('ap_date').value;
+  if(!title){ toast("Andika kichwa cha kikao/ratiba","red"); return; }
+  if(!date){ toast("Weka tarehe","red"); return; }
+  DB.appointments.push({id:uid('apt'), title, date, time:document.getElementById('ap_time').value,
+    location:document.getElementById('ap_location').value.trim(), note:document.getElementById('ap_note').value.trim(), createdAt:nowTime()});
+  saveDB(); closeModal(); toast("Kikao/Ratiba kimehifadhiwa","green");
+  renderAppointments(document.getElementById('view_appointments'));
+}
+function deleteAppointment(id){
+  if(!requireDelete()) return;
+  if(!confirm("Una uhakika unataka kufuta kikao/ratiba hii?")) return;
+  DB.appointments = DB.appointments.filter(a=>a.id!==id);
+  saveDB(); toast("Imefutwa","green");
+  renderAppointments(document.getElementById('view_appointments'));
+}
+
+/* ============================== HR: PROFAILI, MAONYO NA KPI YA MFANYAKAZI ============================== */
+/** KPI kwa mafundi (mafundi wa magari/MIFUMO/ukaguzi): kipimo cha msingi ni UZALISHAJI - idadi ya kazi
+ *  walizokamilisha na mapato waliyochangia, kulinganisha na bajeti/lengo lao la mwaka.
+ *  KPI kwa "supporting staff" (PS, Mgavi, Afisa Tawala n.k.) hawana "mapato" ya moja kwa moja - kwa hiyo
+ *  tunapendekeza kupima kwa TATHMINI YA KILA MWEZI yenye vigezo vinne (kila kimoja alama 1-5):
+ *    - Mahudhurio/Muda (Attendance & Punctuality)
+ *    - Ubora wa Kazi (Quality of Work)
+ *    - Nidhamu (Discipline)
+ *    - Ushirikiano Timu (Teamwork)
+ *  Wastani wa hizi nne ndio "KPI Score" ya mwezi kwa supporting staff. Mafundi wanaweza pia kupewa
+ *  tathmini hii kama nyongeza ya kimaadili juu ya uzalishaji wao wa kifedha. */
+function technicianProductivity(staffId){
+  const vehJobs = DB.vehicles.filter(v=>(v.technicianIds||[]).includes(staffId) || (v.assistantIds||[]).includes(staffId));
+  const vehDone = vehJobs.filter(v=>v.status==='imekamilika');
+  const vehRevenue = vehJobs.reduce((s,v)=>s+vehiclePaidTotal(v.id),0);
+  const mifJobs = DB.mifumoJobs.filter(j=>(j.technicianIds||[]).includes(staffId) || (j.assistantIds||[]).includes(staffId));
+  const mifDone = mifJobs.filter(j=>j.status==='imekamilika');
+  const mifRevenue = mifJobs.reduce((s,j)=>s+DB.mifumoPayments.filter(p=>p.jobId===j.id).reduce((a,p)=>a+Number(p.amount||0),0),0);
+  const totalRevenue = vehRevenue + mifRevenue;
+  const s = staffById(staffId);
+  const target = s ? Number(s.annualBudget||0) : 0;
+  const pct = target>0 ? Math.min(999, Math.round((totalRevenue/target)*100)) : null;
+  return { vehTotal:vehJobs.length, vehDone:vehDone.length, mifTotal:mifJobs.length, mifDone:mifDone.length, totalRevenue, target, pct };
+}
+function openStaffProfile(id){
+  const s = staffById(id);
+  if(!s) return;
+  const prod = technicianProductivity(id);
+  const warnings = DB.staffWarnings.filter(w=>w.staffId===id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const evals = DB.staffEvaluations.filter(e=>e.staffId===id).sort((a,b)=>(b.month||'').localeCompare(a.month||''));
+  const avgScore = evals.length ? (evals.reduce((s2,e)=>s2+Number(e.overall||0),0)/evals.length).toFixed(1) : '—';
+  const allowancesTotal = DB.allowances.filter(a=>a.staffId===id).reduce((s2,a)=>s2+Number(a.amount||0),0);
+  openModal(`
+    <div class="modal-head"><h3>👤 Profaili ya ${esc(s.name)}</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
+      <div class="grid grid-2" style="margin-bottom:14px;">
+        <div><div class="small">Wadhifa</div><div style="font-weight:700;">${esc(s.role)} — ${DEPTS[s.dept]||s.dept}</div></div>
+        <div><div class="small">Simu</div><div style="font-weight:700;">${esc(s.phone||'—')}</div></div>
+        <div><div class="small">Namba ya Ajira</div><div>${esc(s.employeeNumber||'—')}</div></div>
+        <div><div class="small">NIDA</div><div>${esc(s.nationalId||'—')}</div></div>
+        <div><div class="small">Tarehe ya Kuajiriwa</div><div>${esc(s.dateEmployed||'—')}</div></div>
+        <div><div class="small">Tarehe ya Kuzaliwa</div><div>${esc(s.dob||'—')}</div></div>
+        <div><div class="small">Anwani</div><div>${esc(s.address||'—')}</div></div>
+        <div><div class="small">Dharura</div><div>${esc(s.emergencyContact||'—')}</div></div>
+      </div>
+      <div class="divider"></div>
+      <h4 style="margin:10px 0 6px;">📊 Uzalishaji (Productivity)</h4>
+      <div class="grid grid-2" style="margin-bottom:10px;">
+        <div><div class="small">Kazi za Magari</div><div style="font-weight:700;">${prod.vehDone}/${prod.vehTotal} zimekamilika</div></div>
+        <div><div class="small">Kazi za MIFUMO</div><div style="font-weight:700;">${prod.mifDone}/${prod.mifTotal} zimekamilika</div></div>
+        <div><div class="small">Mapato Aliyochangia (Jumla)</div><div style="font-weight:700;color:var(--green);">${fmtMoney(prod.totalRevenue)}</div></div>
+        <div><div class="small">Lengo/Bajeti ya Mwaka</div><div style="font-weight:700;">${prod.target? fmtMoney(prod.target)+' ('+prod.pct+'%)' : 'Haijawekwa'}</div></div>
+      </div>
+      <div class="small">Jumla ya Posho Alizolipwa: <b>${fmtMoney(allowancesTotal)}</b></div>
+      <div class="divider"></div>
+      <div class="flex-between"><h4 style="margin:10px 0 6px;">⭐ Tathmini/KPI ya Kila Mwezi</h4>
+        <button class="btn ghost sm" onclick="openEvaluationForm('${id}')">➕ Ongeza Tathmini</button></div>
+      <div class="small" style="margin-bottom:6px;">Wastani wa Alama Zote: <b>${avgScore}${evals.length?'/5':''}</b></div>
+      <div class="table-wrap"><table><thead><tr><th>Mwezi</th><th>Mahudhurio</th><th>Ubora</th><th>Nidhamu</th><th>Timu</th><th>Wastani</th></tr></thead>
+      <tbody>${evals.map(e=>`<tr><td>${esc(e.month)}</td><td>${e.attendance}</td><td>${e.quality}</td><td>${e.discipline}</td><td>${e.teamwork}</td><td style="font-weight:700;">${e.overall}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna tathmini bado</td></tr>`}</tbody></table></div>
+      <div class="divider"></div>
+      <div class="flex-between"><h4 style="margin:10px 0 6px;">⚠️ Maonyo (Warnings)</h4>
+        <button class="btn ghost sm" onclick="openWarningForm('${id}')">➕ Toa Onyo</button></div>
+      <div class="table-wrap"><table><thead><tr><th>Tarehe</th><th>Sababu</th><th>Aliyetoa</th></tr></thead>
+      <tbody>${warnings.map(w=>`<tr><td>${esc(w.date)}</td><td>${esc(w.reason)}</td><td>${esc(w.issuedBy||'—')}</td></tr>`).join('') || `<tr><td colspan="3" class="empty">Hakuna onyo lolote — rekodi safi</td></tr>`}</tbody></table></div>
+    </div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Funga</button></div>
+  `);
+}
+function openWarningForm(staffId){
+  openModal(`
+    <div class="modal-head"><h3>Toa Onyo</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Tarehe *</label><input id="wn_date" type="date" value="${todayISO()}"></div>
+      <div class="field"><label>Sababu ya Onyo *</label><textarea id="wn_reason" rows="3" placeholder="Eleza sababu ya onyo hili..."></textarea></div>
+      <div class="field"><label>Aliyetoa Onyo</label><input id="wn_issuedBy" value="${currentUser?esc(currentUser.fullName):''}"></div>
+    </div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveWarning('${staffId}')">Hifadhi</button></div>
+  `);
+}
+function saveWarning(staffId){
+  const date = document.getElementById('wn_date').value;
+  const reason = document.getElementById('wn_reason').value.trim();
+  if(!date || !reason){ toast("Jaza tarehe na sababu","red"); return; }
+  DB.staffWarnings.push({id:uid('wrn'), staffId, date, reason, issuedBy:document.getElementById('wn_issuedBy').value.trim(), createdAt:nowTime()});
+  saveDB(); toast("Onyo limehifadhiwa","green");
+  openStaffProfile(staffId);
+}
+function openEvaluationForm(staffId){
+  openModal(`
+    <div class="modal-head"><h3>Ongeza Tathmini ya Mwezi (KPI)</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Mwezi *</label><input id="ev_month" type="month" value="${todayISO().slice(0,7)}"></div>
+      <span class="opt">Kila kigezo kinapimwa kwa alama 1 (dhaifu) mpaka 5 (bora sana)</span>
+      <div class="form-row" style="margin-top:8px;">
+        <div class="field"><label>Mahudhurio & Muda</label><input id="ev_attendance" type="number" min="1" max="5" value="3"></div>
+        <div class="field"><label>Ubora wa Kazi</label><input id="ev_quality" type="number" min="1" max="5" value="3"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Nidhamu</label><input id="ev_discipline" type="number" min="1" max="5" value="3"></div>
+        <div class="field"><label>Ushirikiano Timu</label><input id="ev_teamwork" type="number" min="1" max="5" value="3"></div>
+      </div>
+      <div class="field"><label>Maoni Zaidi</label><textarea id="ev_comments" rows="2"></textarea></div>
+    </div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveEvaluation('${staffId}')">Hifadhi</button></div>
+  `);
+}
+function saveEvaluation(staffId){
+  const month = document.getElementById('ev_month').value;
+  if(!month){ toast("Chagua mwezi","red"); return; }
+  const attendance = Math.min(5,Math.max(1,Number(document.getElementById('ev_attendance').value)||3));
+  const quality = Math.min(5,Math.max(1,Number(document.getElementById('ev_quality').value)||3));
+  const discipline = Math.min(5,Math.max(1,Number(document.getElementById('ev_discipline').value)||3));
+  const teamwork = Math.min(5,Math.max(1,Number(document.getElementById('ev_teamwork').value)||3));
+  const overall = Number(((attendance+quality+discipline+teamwork)/4).toFixed(1));
+  DB.staffEvaluations.push({id:uid('evl'), staffId, month, attendance, quality, discipline, teamwork, overall,
+    comments:document.getElementById('ev_comments').value.trim(), evaluatedBy: currentUser?currentUser.fullName:'', createdAt:nowTime()});
+  saveDB(); toast("Tathmini imehifadhiwa","green");
+  openStaffProfile(staffId);
 }
 
 /* ============================== PERFORMANCE ============================== */
@@ -3222,6 +3758,7 @@ function buildTopbarActions(){
 
 /* ============================== SHARED: DELETE + RAW PRINT ============================== */
 function deleteRecord(arrName, id){
+  if(!requireDelete()) return;
   if(!confirm("Una uhakika unataka kufuta rekodi hii?")) return;
   DB[arrName] = DB[arrName].filter(r=>r.id!==id);
   saveDB(); toast("Rekodi imefutwa","green");
@@ -3265,7 +3802,7 @@ function renderValuation(el){
   <div class="card">
     <div class="table-wrap"><table><thead><tr><th>Namba ya Usajili</th><th>Mmiliki</th><th>Kusudi</th><th>Thamani ya Soko</th><th>Tarehe</th><th></th></tr></thead>
     <tbody>${list.map(v=>`<tr><td class="mono">${esc(v.regNo)}</td><td>${esc(v.owner)}</td><td>${esc(v.purpose||'—')}</td><td style="font-weight:700;">${fmtMoney(v.marketValue)}</td><td>${fmtDate(v.date)}</td>
-      <td style="text-align:right;"><button class="btn ghost sm" onclick="printValuation('${v.id}')">🖨️ Chapisha</button> <button class="btn ghost sm" onclick="deleteRecord('valuations','${v.id}')">Futa</button></td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna ripoti ya uthamini bado</td></tr>`}</tbody></table></div>
+      <td style="text-align:right;"><button class="btn ghost sm" onclick="printValuation('${v.id}')">🖨️ Chapisha</button> ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('valuations','${v.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna ripoti ya uthamini bado</td></tr>`}</tbody></table></div>
   </div>
   `;
 }
@@ -3437,7 +3974,7 @@ function renderRoadworthiness(el){
       <td><span class="badge ${r.exterior==='GOOD'?'green':r.exterior==='POOR'?'red':'amber'} dot">${esc(r.exterior||'—')}</span></td>
       <td><span class="badge ${r.brakeSystem==='GOOD'?'green':r.brakeSystem==='POOR'?'red':'amber'} dot">${esc(r.brakeSystem||'—')}</span></td>
       <td>${fmtDate(r.date)}</td>
-      <td style="text-align:right;"><button class="btn ghost sm" onclick="printRoadworthiness('${r.id}')">🖨️ Chapisha</button> <button class="btn ghost sm" onclick="deleteRecord('roadworthiness','${r.id}')">Futa</button></td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna ripoti bado</td></tr>`}</tbody></table></div>
+      <td style="text-align:right;"><button class="btn ghost sm" onclick="printRoadworthiness('${r.id}')">🖨️ Chapisha</button> ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('roadworthiness','${r.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna ripoti bado</td></tr>`}</tbody></table></div>
   </div>
   `;
 }
@@ -3632,7 +4169,7 @@ function renderBoardingOff(el){
   <div class="card">
     <div class="table-wrap"><table><thead><tr><th>Namba</th><th>Location</th><th>Uamuzi</th><th>Tarehe</th><th></th></tr></thead>
     <tbody>${list.map(b=>`<tr><td class="mono">${esc(b.regNo)}</td><td>${esc(b.location||'—')}</td><td>${esc(b.action||'—')}</td><td>${fmtDate(b.date)}</td>
-      <td style="text-align:right;"><button class="btn ghost sm" onclick="printBoardingOff('${b.id}')">🖨️ Chapisha</button> <button class="btn ghost sm" onclick="deleteRecord('boardingOff','${b.id}')">Futa</button></td></tr>`).join('') || `<tr><td colspan="5" class="empty">Hakuna ripoti bado</td></tr>`}</tbody></table></div>
+      <td style="text-align:right;"><button class="btn ghost sm" onclick="printBoardingOff('${b.id}')">🖨️ Chapisha</button> ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('boardingOff','${b.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="5" class="empty">Hakuna ripoti bado</td></tr>`}</tbody></table></div>
   </div>
   `;
 }
@@ -3848,7 +4385,7 @@ function renderTradeTest(el){
     <tbody>${list.map(t=>{ const g=ttGradeResult(t.gradeTotal);
       return `<tr><td class="mono">${esc(t.licenceNo)}</td><td>${esc(t.fullName)}</td><td style="font-weight:700;">${t.gradeTotal}%</td>
       <td><span class="badge ${g.cls} dot">${g.label}</span></td><td>${fmtDate(t.date)}</td>
-      <td style="text-align:right;"><button class="btn ghost sm" onclick="printTradeTestSheet('${t.id}')">🖨️ Alama</button> <button class="btn ghost sm" onclick="printTradeTestCert('${t.id}')">🖨️ Cheti</button> <button class="btn ghost sm" onclick="deleteRecord('tradeTests','${t.id}')">Futa</button></td></tr>`;
+      <td style="text-align:right;"><button class="btn ghost sm" onclick="printTradeTestSheet('${t.id}')">🖨️ Alama</button> <button class="btn ghost sm" onclick="printTradeTestCert('${t.id}')">🖨️ Cheti</button> ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('tradeTests','${t.id}')">Futa</button>`:''}</td></tr>`;
     }).join('') || `<tr><td colspan="6" class="empty">Hakuna dereva aliyepimwa bado</td></tr>`}</tbody></table></div>
   </div>
   `;
@@ -4032,7 +4569,7 @@ function renderParkingFees(el){
   <div class="card">
     <div class="table-wrap"><table><thead><tr><th>Tarehe</th><th>Namba ya Gari</th><th>Mlipaji</th><th>Kiasi</th><th>Mtumishi Aliyehusika</th><th>Maelezo</th><th></th></tr></thead>
     <tbody>${list.map(p=>`<tr><td>${fmtDate(p.date)}</td><td class="mono">${esc(p.regNo||'—')}</td><td>${esc(p.payer||'—')}</td><td style="font-weight:700;">${fmtMoney(p.amount)}</td><td>${esc(staffName(p.handledBy))}</td><td>${esc(p.note||'—')}</td>
-      <td style="text-align:right;"><button class="btn ghost sm" onclick="deleteRecord('parkingFees','${p.id}')">Futa</button></td></tr>`).join('') || `<tr><td colspan="7" class="empty">Hakuna rekodi bado</td></tr>`}</tbody></table></div>
+      <td style="text-align:right;">${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('parkingFees','${p.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="7" class="empty">Hakuna rekodi bado</td></tr>`}</tbody></table></div>
   </div>
   `;
 }
@@ -4280,8 +4817,8 @@ function renderUsers(el){
       <td>${u.isAdmin ? '<span class="badge amber dot">Ruhusa Zote</span>' : `<span class="small">${(u.allowedModules||[]).length} sehemu</span>`}</td>
       <td>${u.active===false ? '<span class="badge red dot">Imezimwa</span>' : '<span class="badge green dot">Hai</span>'}</td>
       <td style="text-align:right;">
-        <button class="btn ghost sm" onclick="openUserForm('${u.id}')">Hariri</button>
-        ${u.id!==currentUser.id ? `<button class="btn ghost sm" onclick="deleteUser('${u.id}')">Futa</button>` : ''}
+        ${canEditNow()?`<button class="btn ghost sm" onclick="openUserForm('${u.id}')">Hariri</button>`:''}
+        ${u.id!==currentUser.id && canDeleteNow() ? `<button class="btn ghost sm" onclick="deleteUser('${u.id}')">Futa</button>` : ''}
       </td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna mtumiaji bado</td></tr>`}</tbody></table></div>
   </div>
   `;
@@ -4317,6 +4854,18 @@ function openUserForm(id){
         <input type="checkbox" id="uf_isAdmin" style="width:auto;" ${u&&u.isAdmin?'checked':''} onchange="toggleAdminModules(this.checked)">
         <label style="margin:0;" for="uf_isAdmin">Msimamizi (Ruhusa Zote + Kusimamia Watumiaji)</label>
       </div>
+      <div class="small" style="font-weight:700;color:var(--navy);margin-top:12px;margin-bottom:4px;">Ruhusa za Ziada (kwa asiyekuwa Msimamizi)</div>
+      <div class="form-row">
+        <div class="field" style="flex-direction:row;align-items:center;gap:8px;">
+          <input type="checkbox" id="uf_canEdit" style="width:auto;" ${u&&(u.isAdmin||u.canEdit)?'checked':''}>
+          <label style="margin:0;" for="uf_canEdit">Ruhusa ya Kuhariri Taarifa</label>
+        </div>
+        <div class="field" style="flex-direction:row;align-items:center;gap:8px;">
+          <input type="checkbox" id="uf_canDelete" style="width:auto;" ${u&&(u.isAdmin||u.canDelete)?'checked':''}>
+          <label style="margin:0;" for="uf_canDelete">Ruhusa ya Kufuta Taarifa</label>
+        </div>
+      </div>
+      <span class="opt">Bila kuwasha hizi, mtumiaji ataweza tu kuongeza taarifa mpya na kuona zilizopo — hataweza kuhariri wala kufuta wafanyakazi, watumiaji, posho au matumizi.</span>
       ${u ? `<div class="field" style="flex-direction:row;align-items:center;gap:8px;margin-top:8px;">
         <input type="checkbox" id="uf_active" style="width:auto;" ${u.active!==false?'checked':''}>
         <label style="margin:0;" for="uf_active">Akaunti Hai (zima ili kumzuia kuingia bila kufuta historia)</label>
@@ -4332,9 +4881,14 @@ function applyRolePreset(key){
   document.getElementById('uf_isAdmin').checked = preset.isAdmin;
 }
 function toggleAdminModules(isAdmin){
-  if(isAdmin) document.querySelectorAll('#uf_modules input[type=checkbox]').forEach(cb=>cb.checked=true);
+  if(isAdmin){
+    document.querySelectorAll('#uf_modules input[type=checkbox]').forEach(cb=>cb.checked=true);
+    document.getElementById('uf_canEdit').checked = true;
+    document.getElementById('uf_canDelete').checked = true;
+  }
 }
 async function saveUser(id){
+  if(id && !requireEdit()) return;
   const fullName = document.getElementById('uf_fullName').value.trim();
   const username = document.getElementById('uf_username').value.trim();
   const pw = document.getElementById('uf_password').value;
@@ -4346,8 +4900,10 @@ async function saveUser(id){
   if(!id && !pw){ err.textContent="Weka nenosiri kwa mtumiaji mpya"; err.classList.add('show'); return; }
   const allowedModules = [...document.querySelectorAll('#uf_modules input:checked')].map(i=>i.value);
   const isAdmin = document.getElementById('uf_isAdmin').checked;
+  const canEdit = isAdmin || document.getElementById('uf_canEdit').checked;
+  const canDelete = isAdmin || document.getElementById('uf_canDelete').checked;
   const role = document.getElementById('uf_rolePreset').value;
-  const data = { fullName, username, role, allowedModules, isAdmin };
+  const data = { fullName, username, role, allowedModules, isAdmin, canEdit, canDelete };
   if(id){
     const u = DB.users.find(x=>x.id===id);
     Object.assign(u, data);
@@ -4363,6 +4919,7 @@ async function saveUser(id){
   if(id===currentUser?.id){ buildSidebar(); } // refresh own nav if self-edited
 }
 function deleteUser(id){
+  if(!requireDelete()) return;
   if(!confirm("Una uhakika unataka kufuta mtumiaji huyu?")) return;
   DB.users = DB.users.filter(u=>u.id!==id);
   saveDB(); toast("Mtumiaji amefutwa","green");
