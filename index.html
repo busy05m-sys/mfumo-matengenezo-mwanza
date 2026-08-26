@@ -243,14 +243,25 @@ const firebaseConfig = {
   messagingSenderId: "763792561463",
   appId: "1:763792561463:web:3459bcd325bdf2d404f6b2"
 };
-firebase.initializeApp(firebaseConfig);
-const cloudDB = firebase.firestore();
 // Data nzima ya mfumo (DB) inahifadhiwa kama hati (document) MOJA hapa.
 // Faida: mabadiliko kidogo tu kwenye code ya awali. Kikomo: hati moja ya
 // Firestore haizidi 1MB — kwa ukubwa wa taarifa za sasa (mamia machache ya KB)
 // hii inatosha kwa muda mrefu; tukikaribia kikomo, tutahitaji kugawanya
 // makusanyo (collections) — si dharura kwa sasa.
-const dbDocRef = cloudDB.collection('temesa_mwanza').doc('main_db');
+// MUHIMU: hii yote imezungushwa kwenye try/catch ili kama Firebase haikupakii kwa
+// sababu ya mtandao mbovu (au haipatikani kabisa), mfumo mzima usivunjike — badala
+// yake unaendelea kwa nakala ya ndani (localStorage) tu, kama zamani.
+let cloudDB = null;
+let dbDocRef = null;
+let firebaseAvailable = false;
+try{
+  firebase.initializeApp(firebaseConfig);
+  cloudDB = firebase.firestore();
+  dbDocRef = cloudDB.collection('temesa_mwanza').doc('main_db');
+  firebaseAvailable = true;
+}catch(e){
+  console.error('Firebase haikuweza kuanzishwa (huenda hakuna mtandao) — mfumo utatumia nakala ya ndani pekee.', e);
+}
 let cloudReady = false;      // true baada ya upakuaji wa kwanza kukamilika
 let applyingRemoteUpdate = false; // gubbly-guard: epuka mzunguko wa saveDB<->listener
 
@@ -423,7 +434,7 @@ function saveDB(){
   // Tuma nakala kwenye Firestore (database ya mtandaoni) ili vifaa vingine
   // vinavyofungua mfumo huu vione mabadiliko haya. Haizuii mtumiaji kuendelea
   // kufanya kazi hata kama mtandao ni hafifu — itajaribu tena kimya kimya.
-  if(!applyingRemoteUpdate){
+  if(!applyingRemoteUpdate && firebaseAvailable && dbDocRef){
     dbDocRef.set({ json: JSON.stringify(DB), updatedAt: DB.meta.updatedAt })
       .then(()=>{ updateCloudBadge(true); })
       .catch(err=>{
@@ -5002,6 +5013,14 @@ function mergeIntoDefaultDB(parsed){
   return d;
 }
 async function bootFromCloud(){
+  if(!firebaseAvailable || !dbDocRef){
+    // Firebase haikupatikana kabisa (mtandao mbovu/haipo) — endelea na nakala ya ndani pekee,
+    // kama mfumo ulivyokuwa awali kabla ya database ya mtandaoni.
+    updateCloudBadge(false);
+    toast("Hakuna muunganiko wa Firebase (mtandao). Unatumia nakala ya ndani ya kifaa hiki kwa sasa.","amber");
+    initAuth();
+    return;
+  }
   try{
     // Sign in kimya kimya (bila jina/nenosiri) ili Firestore Security Rules ziweze
     // kuruhusu ufikiaji WA APP HII TU (kupitia mtandao wa Firebase Auth), na kuzuia
@@ -5032,6 +5051,7 @@ async function bootFromCloud(){
  *  kusasisha skrini papo hapo bila kuhitaji ku-refresh. Inapuuza "echo" ya maandishi yetu
  *  wenyewe (hasPendingWrites) ili isijirudie mzunguko usio na maana. */
 function attachCloudListener(){
+  if(!firebaseAvailable || !dbDocRef) return;
   dbDocRef.onSnapshot(snap=>{
     if(!snap.exists) return;
     if(snap.metadata.hasPendingWrites) return; // ni andiko letu wenyewe, bado halijathibitishwa na server
