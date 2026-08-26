@@ -4993,6 +4993,14 @@ function dismissEmailReminder(){ localStorage.setItem('temesa_email_reminder_dis
 /* ---------------------------- CLOUD BOOT + REALTIME SYNC ---------------------------- */
 /** Inapakia database kutoka Firestore mara moja mwanzoni. Ikiwa hakuna data mtandaoni bado
  *  (mfumo mpya), inatuma nakala ya sasa (ya ndani/tupu) kwenda mtandaoni kama mwanzo. */
+/** Inaunganisha data iliyopakuliwa (kutoka Firestore) na muundo kamili wa defaultDB() — hii inahakikisha
+ *  data ya zamani (iliyohifadhiwa kabla ya sehemu mpya kama Posho/Matumizi/Vikao kuongezwa) haisababishi
+ *  hitilafu ya "undefined" kwenye sehemu mpya; badala yake zinabaki tupu ([]) mpaka zijazwe. */
+function mergeIntoDefaultDB(parsed){
+  const d = defaultDB();
+  for(const k in d){ if(parsed && parsed[k]) d[k] = parsed[k]; }
+  return d;
+}
 async function bootFromCloud(){
   try{
     // Sign in kimya kimya (bila jina/nenosiri) ili Firestore Security Rules ziweze
@@ -5001,7 +5009,7 @@ async function bootFromCloud(){
     await firebase.auth().signInAnonymously();
     const snap = await dbDocRef.get();
     if(snap.exists && snap.data() && snap.data().json){
-      DB = migrateDB(JSON.parse(snap.data().json));
+      DB = migrateDB(mergeIntoDefaultDB(JSON.parse(snap.data().json)));
       try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
     } else {
       // Hati bado haipo mtandaoni — hii ndiyo mara ya kwanza mfumo unawekwa online.
@@ -5030,7 +5038,7 @@ function attachCloudListener(){
     const data = snap.data();
     if(!data || !data.json) return;
     let incoming;
-    try{ incoming = migrateDB(JSON.parse(data.json)); }catch(e){ return; }
+    try{ incoming = migrateDB(mergeIntoDefaultDB(JSON.parse(data.json))); }catch(e){ return; }
     if(DB.meta && incoming.meta && DB.meta.updatedAt === incoming.meta.updatedAt) return; // hakuna kilichobadilika
     applyingRemoteUpdate = true;
     DB = incoming;
