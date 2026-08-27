@@ -315,6 +315,109 @@ function defaultDB(){
   };
 }
 
+/* ============================== TATHMINI YA KARAKANA (KPI SYSTEM) ============================== */
+/** Orodha rasmi ya KPI za Mafundi (Mechanics, Auto-Electricians, Welders/Fabricators, Painters,
+ *  Tyre/Service Technicians, Other Technical Staff) - ZINAFANANA kwa makundi yote ya kiufundi.
+ *  MUHIMU: usifute wala kupunguza hizi - Msimamizi anaweza tu KUBADILISHA UZITO (weight) kupitia
+ *  "Mipangilio ya KPI", mradi jumla iendelee kuwa 100%. */
+const MAFUNDI_KPI_LIST = [
+  {key:'jobs_completed', label:'Jobs Completed / Productivity', weight:20},
+  {key:'quality_fix', label:'Quality / First-Time Fix', weight:15},
+  {key:'labour_efficiency', label:'Labour Efficiency', weight:15},
+  {key:'turnaround_time', label:'Turnaround Time', weight:10},
+  {key:'preventive_maintenance', label:'Preventive Maintenance', weight:10},
+  {key:'safety_compliance', label:'Safety Compliance', weight:10},
+  {key:'tools_parts_mgmt', label:'Tools & Spare Parts Management', weight:5},
+  {key:'documentation', label:'Documentation / Job Cards', weight:5},
+  {key:'attendance_discipline', label:'Attendance & Discipline', weight:5},
+  {key:'teamwork_service', label:'Teamwork / Customer Service', weight:5}
+];
+const STOREKEEPER_KPI_LIST = [
+  {key:'stock_accuracy', label:'Stock Accuracy', weight:15},
+  {key:'issuing_efficiency', label:'Issuing Efficiency', weight:15},
+  {key:'stock_records', label:'Stock Records', weight:10},
+  {key:'stock_availability', label:'Stock Availability', weight:15},
+  {key:'grn_accuracy', label:'GRN / Receiving Accuracy', weight:15},
+  {key:'compliance', label:'Compliance', weight:10},
+  {key:'cleanliness_store', label:'Usafi wa Store / Mazingira', weight:10},
+  {key:'discipline', label:'Discipline', weight:5},
+  {key:'teamwork', label:'Teamwork', weight:5}
+];
+const PROCUREMENT_KPI_LIST = [
+  {key:'procurement_turnaround', label:'Procurement Turnaround', weight:20},
+  {key:'procurement_compliance', label:'Procurement Compliance', weight:15},
+  {key:'supplier_mgmt', label:'Supplier Management', weight:15},
+  {key:'documentation', label:'Documentation', weight:15},
+  {key:'value_for_money', label:'Value for Money', weight:15},
+  {key:'timeliness', label:'Timeliness', weight:10},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
+  {key:'discipline', label:'Discipline', weight:5}
+];
+const ACCOUNTANT_KPI_LIST = [
+  {key:'transaction_accuracy', label:'Transaction Accuracy', weight:20},
+  {key:'reconciliation', label:'Reconciliation', weight:15},
+  {key:'timely_reporting', label:'Timely Reporting', weight:15},
+  {key:'records', label:'Records', weight:15},
+  {key:'compliance', label:'Compliance', weight:15},
+  {key:'customer_service', label:'Customer / Internal Service', weight:10},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
+  {key:'discipline', label:'Discipline', weight:5}
+];
+const SECRETARY_KPI_LIST = [
+  {key:'reports_correspondence', label:'Reports / Correspondence', weight:20},
+  {key:'data_accuracy', label:'Data Accuracy', weight:15},
+  {key:'filing_records', label:'Filing / Records', weight:15},
+  {key:'timeliness', label:'Timeliness', weight:15},
+  {key:'customer_service', label:'Customer Service', weight:15},
+  {key:'office_support', label:'Office Support', weight:10},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
+  {key:'discipline', label:'Discipline', weight:5}
+];
+/** Nafasi ambazo hazina KPI maalum kwenye taratibu - Msimamizi anaweka KPI zake mwenyewe kupitia
+ *  Mipangilio ya KPI. Tumeweka default ya kuanzia inayotumika mpaka aibadilishe. */
+const GENERIC_SUPPORTING_KPI_LIST = [
+  {key:'quality_of_work', label:'Ubora wa Kazi', weight:25},
+  {key:'timeliness', label:'Utimilifu wa Muda', weight:20},
+  {key:'compliance', label:'Kufuata Taratibu (Compliance)', weight:15},
+  {key:'attendance', label:'Mahudhurio', weight:15},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:10},
+  {key:'discipline', label:'Nidhamu', weight:10},
+  {key:'teamwork', label:'Ushirikiano Timu', weight:5}
+];
+/** Ramani ya nafasi (position) kwenda kwenye KPI list yake. "category" inatumika kwenye Dashibodi
+ *  kutofautisha Mafundi na Supporting Staff. "extraCleanliness" = true kwa Mafundi maana yake Usafi
+ *  Binafsi & Mazingira ni KIPIMO CHA ZIADA (hakihesabiwi kwenye 100%) - kwa Supporting Staff tayari
+ *  kimo ndani ya orodha yao kuu (kwenye 100%). */
+const KPI_POSITIONS = {
+  mechanic: {label:'Mechanic', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  auto_electrician: {label:'Auto-Electrician', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  welder: {label:'Welder / Fabricator', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  painter: {label:'Painter', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  tyre_technician: {label:'Tyre / Service Technician', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  other_technical: {label:'Other Technical Staff', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  storekeeper: {label:'Storekeeper', category:'supporting', kpis:STOREKEEPER_KPI_LIST, extraCleanliness:false, customizable:true},
+  procurement: {label:'Procurement', category:'supporting', kpis:PROCUREMENT_KPI_LIST, extraCleanliness:false, customizable:true},
+  accountant: {label:'Accountant / Cashier', category:'supporting', kpis:ACCOUNTANT_KPI_LIST, extraCleanliness:false, customizable:true},
+  secretary_admin: {label:'Secretary / Admin / Reception', category:'supporting', kpis:SECRETARY_KPI_LIST, extraCleanliness:false, customizable:true},
+  ict: {label:'ICT', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
+  cleaner: {label:'Cleaner', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
+  security: {label:'Security', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
+  other_supporting: {label:'Other Supporting Staff', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true}
+};
+/** Vitu vinavyopimwa ndani ya "Usafi Binafsi" na "Mazingira" (kwa Mafundi, kama kipimo cha ziada). */
+const CLEANLINESS_PERSONAL_ITEMS = ['Mavazi/Workwear','PPE','Mwonekano','Viatu vya Kazi','Usafi wa Mwili/Mikono'];
+const CLEANLINESS_ENV_ITEMS = ['Workstation','Garage Floor','Oil/Grease Spills','Tools Arrangement','Waste Disposal','Oil/Chemical Disposal','Passageways','Usafi wa Ofisi/Store/Workshop','General Housekeeping'];
+function gradeFromPercent(pct){
+  if(pct>=90) return {letter:'A', label:'Outstanding', cls:'green'};
+  if(pct>=80) return {letter:'B', label:'Very Good', cls:'blue'};
+  if(pct>=70) return {letter:'C', label:'Good', cls:'blue'};
+  if(pct>=60) return {letter:'D', label:'Needs Improvement', cls:'amber'};
+  return {letter:'E', label:'Unsatisfactory', cls:'red'};
+}
+function kpiTemplateFor(positionKey){
+  return (DB.kpiTemplates && DB.kpiTemplates[positionKey]) || KPI_POSITIONS[positionKey] || null;
+}
+
 let DB = loadDB();
 function loadDB(){
   try{
@@ -658,108 +761,6 @@ const DEPT_ROLES = {
 };
 const CUSTOM_ROLE_OPTION = "__nyingine__";
 
-/* ============================== TATHMINI YA KARAKANA (KPI SYSTEM) ============================== */
-/** Orodha rasmi ya KPI za Mafundi (Mechanics, Auto-Electricians, Welders/Fabricators, Painters,
- *  Tyre/Service Technicians, Other Technical Staff) - ZINAFANANA kwa makundi yote ya kiufundi.
- *  MUHIMU: usifute wala kupunguza hizi - Msimamizi anaweza tu KUBADILISHA UZITO (weight) kupitia
- *  "Mipangilio ya KPI", mradi jumla iendelee kuwa 100%. */
-const MAFUNDI_KPI_LIST = [
-  {key:'jobs_completed', label:'Jobs Completed / Productivity', weight:20},
-  {key:'quality_fix', label:'Quality / First-Time Fix', weight:15},
-  {key:'labour_efficiency', label:'Labour Efficiency', weight:15},
-  {key:'turnaround_time', label:'Turnaround Time', weight:10},
-  {key:'preventive_maintenance', label:'Preventive Maintenance', weight:10},
-  {key:'safety_compliance', label:'Safety Compliance', weight:10},
-  {key:'tools_parts_mgmt', label:'Tools & Spare Parts Management', weight:5},
-  {key:'documentation', label:'Documentation / Job Cards', weight:5},
-  {key:'attendance_discipline', label:'Attendance & Discipline', weight:5},
-  {key:'teamwork_service', label:'Teamwork / Customer Service', weight:5}
-];
-const STOREKEEPER_KPI_LIST = [
-  {key:'stock_accuracy', label:'Stock Accuracy', weight:15},
-  {key:'issuing_efficiency', label:'Issuing Efficiency', weight:15},
-  {key:'stock_records', label:'Stock Records', weight:10},
-  {key:'stock_availability', label:'Stock Availability', weight:15},
-  {key:'grn_accuracy', label:'GRN / Receiving Accuracy', weight:15},
-  {key:'compliance', label:'Compliance', weight:10},
-  {key:'cleanliness_store', label:'Usafi wa Store / Mazingira', weight:10},
-  {key:'discipline', label:'Discipline', weight:5},
-  {key:'teamwork', label:'Teamwork', weight:5}
-];
-const PROCUREMENT_KPI_LIST = [
-  {key:'procurement_turnaround', label:'Procurement Turnaround', weight:20},
-  {key:'procurement_compliance', label:'Procurement Compliance', weight:15},
-  {key:'supplier_mgmt', label:'Supplier Management', weight:15},
-  {key:'documentation', label:'Documentation', weight:15},
-  {key:'value_for_money', label:'Value for Money', weight:15},
-  {key:'timeliness', label:'Timeliness', weight:10},
-  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
-  {key:'discipline', label:'Discipline', weight:5}
-];
-const ACCOUNTANT_KPI_LIST = [
-  {key:'transaction_accuracy', label:'Transaction Accuracy', weight:20},
-  {key:'reconciliation', label:'Reconciliation', weight:15},
-  {key:'timely_reporting', label:'Timely Reporting', weight:15},
-  {key:'records', label:'Records', weight:15},
-  {key:'compliance', label:'Compliance', weight:15},
-  {key:'customer_service', label:'Customer / Internal Service', weight:10},
-  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
-  {key:'discipline', label:'Discipline', weight:5}
-];
-const SECRETARY_KPI_LIST = [
-  {key:'reports_correspondence', label:'Reports / Correspondence', weight:20},
-  {key:'data_accuracy', label:'Data Accuracy', weight:15},
-  {key:'filing_records', label:'Filing / Records', weight:15},
-  {key:'timeliness', label:'Timeliness', weight:15},
-  {key:'customer_service', label:'Customer Service', weight:15},
-  {key:'office_support', label:'Office Support', weight:10},
-  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
-  {key:'discipline', label:'Discipline', weight:5}
-];
-/** Nafasi ambazo hazina KPI maalum kwenye taratibu - Msimamizi anaweka KPI zake mwenyewe kupitia
- *  Mipangilio ya KPI. Tumeweka default ya kuanzia inayotumika mpaka aibadilishe. */
-const GENERIC_SUPPORTING_KPI_LIST = [
-  {key:'quality_of_work', label:'Ubora wa Kazi', weight:25},
-  {key:'timeliness', label:'Utimilifu wa Muda', weight:20},
-  {key:'compliance', label:'Kufuata Taratibu (Compliance)', weight:15},
-  {key:'attendance', label:'Mahudhurio', weight:15},
-  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:10},
-  {key:'discipline', label:'Nidhamu', weight:10},
-  {key:'teamwork', label:'Ushirikiano Timu', weight:5}
-];
-/** Ramani ya nafasi (position) kwenda kwenye KPI list yake. "category" inatumika kwenye Dashibodi
- *  kutofautisha Mafundi na Supporting Staff. "extraCleanliness" = true kwa Mafundi maana yake Usafi
- *  Binafsi & Mazingira ni KIPIMO CHA ZIADA (hakihesabiwi kwenye 100%) - kwa Supporting Staff tayari
- *  kimo ndani ya orodha yao kuu (kwenye 100%). */
-const KPI_POSITIONS = {
-  mechanic: {label:'Mechanic', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
-  auto_electrician: {label:'Auto-Electrician', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
-  welder: {label:'Welder / Fabricator', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
-  painter: {label:'Painter', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
-  tyre_technician: {label:'Tyre / Service Technician', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
-  other_technical: {label:'Other Technical Staff', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
-  storekeeper: {label:'Storekeeper', category:'supporting', kpis:STOREKEEPER_KPI_LIST, extraCleanliness:false, customizable:true},
-  procurement: {label:'Procurement', category:'supporting', kpis:PROCUREMENT_KPI_LIST, extraCleanliness:false, customizable:true},
-  accountant: {label:'Accountant / Cashier', category:'supporting', kpis:ACCOUNTANT_KPI_LIST, extraCleanliness:false, customizable:true},
-  secretary_admin: {label:'Secretary / Admin / Reception', category:'supporting', kpis:SECRETARY_KPI_LIST, extraCleanliness:false, customizable:true},
-  ict: {label:'ICT', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
-  cleaner: {label:'Cleaner', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
-  security: {label:'Security', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
-  other_supporting: {label:'Other Supporting Staff', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true}
-};
-/** Vitu vinavyopimwa ndani ya "Usafi Binafsi" na "Mazingira" (kwa Mafundi, kama kipimo cha ziada). */
-const CLEANLINESS_PERSONAL_ITEMS = ['Mavazi/Workwear','PPE','Mwonekano','Viatu vya Kazi','Usafi wa Mwili/Mikono'];
-const CLEANLINESS_ENV_ITEMS = ['Workstation','Garage Floor','Oil/Grease Spills','Tools Arrangement','Waste Disposal','Oil/Chemical Disposal','Passageways','Usafi wa Ofisi/Store/Workshop','General Housekeeping'];
-function gradeFromPercent(pct){
-  if(pct>=90) return {letter:'A', label:'Outstanding', cls:'green'};
-  if(pct>=80) return {letter:'B', label:'Very Good', cls:'blue'};
-  if(pct>=70) return {letter:'C', label:'Good', cls:'blue'};
-  if(pct>=60) return {letter:'D', label:'Needs Improvement', cls:'amber'};
-  return {letter:'E', label:'Unsatisfactory', cls:'red'};
-}
-function kpiTemplateFor(positionKey){
-  return (DB.kpiTemplates && DB.kpiTemplates[positionKey]) || KPI_POSITIONS[positionKey] || null;
-}
 
 /** Roles eligible to be assigned to a vehicle job — anyone in the UKAGUZI or MATENGENEZO department, regardless of exact title. */
 function assignableStaff(){ return DB.staff.filter(s=> s.dept==='UKAGUZI' || s.dept==='MATENGENEZO'); }
