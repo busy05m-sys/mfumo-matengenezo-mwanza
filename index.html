@@ -870,13 +870,8 @@ const NAV = [
   {group:"Watumishi", items:[
     {id:"staff", label:"Wafanyakazi Wote", ic:"👥"},
     {id:"performance", label:"Utendaji & Mafundi Bora", ic:"🏆"},
+    {id:"kpi", label:"Tathmini ya KPI (Karakana)", ic:"📝"},
     {id:"allowances", label:"Posho (Allowances)", ic:"💵"},
-  ]},
-  {group:"Tathmini ya Karakana (KPI)", items:[
-    {id:"kpiassessment", label:"Tathmini za Kila Mwezi", ic:"📝"},
-    {id:"kpidashboard", label:"Dashibodi ya Utendaji", ic:"📶"},
-    {id:"kpireports", label:"Ripoti za KPI", ic:"📑"},
-    {id:"kpisettings", label:"Mipangilio ya KPI", ic:"⚙️"},
   ]},
   {group:"Fedha", items:[
     {id:"finance", label:"Mapato & Malipo", ic:"💰"},
@@ -922,17 +917,14 @@ const PAGE_META = {
   reports:["Ripoti","Chagua ripoti na uichapishe"],
   users:["Watumiaji & Ruhusa","Simamia akaunti za watumiaji na wanachoweza kuona/kufanya"],
   appointments:["Vikao & Ratiba za Meneja","Panga na fuatilia vikao na ratiba za nje"],
-  kpiassessment:["Tathmini za Kila Mwezi","Fanya tathmini ya utendaji ya kila mtumishi kwa mwezi"],
-  kpidashboard:["Dashibodi ya Utendaji","Muhtasari wa utendaji wa karakana nzima"],
-  kpireports:["Ripoti za KPI","Chapisha ripoti za utendaji"],
-  kpisettings:["Mipangilio ya KPI","Badilisha uzito (weights) wa kila KPI kwa kila nafasi"],
+  kpi:["Tathmini ya KPI (Karakana)","Tathmini ya utendaji ya kila mwezi, dashibodi, ripoti na mipangilio"],
 };
 
 /* ---------------------------- ACCOUNTS / PERMISSIONS ---------------------------- */
 const ALL_MODULES = NAV.flatMap(g=>g.items).filter(i=>i.id!=='users');
 const ROLE_PRESETS = {
   "Msimamizi (Full Access)": {isAdmin:true, modules: ALL_MODULES.map(m=>m.id)},
-  "Meneja wa Mkoa": {isAdmin:false, modules: ['dashboard','vehicles','mifumo','staff','performance','allowances','finance','expenditures','profitloss','reports','feedback','valuation','tradetest','parkingfees','roadworthiness','boardingoff','appointments','kpiassessment','kpidashboard','kpireports','kpisettings']},
+  "Meneja wa Mkoa": {isAdmin:false, modules: ['dashboard','vehicles','mifumo','staff','performance','allowances','finance','expenditures','profitloss','reports','feedback','valuation','tradetest','parkingfees','roadworthiness','boardingoff','appointments','kpi']},
   "Mhasibu": {isAdmin:false, modules: ['dashboard','finance','expenditures','profitloss','allowances','reports','parkingfees']},
   "Mgavi": {isAdmin:false, modules: ['dashboard','parts','consumables']},
   "Fundi wa Ukaguzi": {isAdmin:false, modules: ['dashboard','vehicles','roadworthiness','feedback']},
@@ -1067,10 +1059,7 @@ function render(){
     reports: renderReports,
     users: renderUsers,
     appointments: renderAppointments,
-    kpiassessment: renderKpiAssessment,
-    kpidashboard: renderKpiDashboard,
-    kpireports: renderKpiReports,
-    kpisettings: renderKpiSettings,
+    kpi: renderKpiHub,
   }[currentView];
   const content = document.getElementById('content');
   let el = document.getElementById('view_'+currentView);
@@ -3001,9 +2990,10 @@ function openStaffProfile(id){
   if(!s) return;
   const prod = technicianProductivity(id);
   const warnings = DB.staffWarnings.filter(w=>w.staffId===id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  const evals = DB.staffEvaluations.filter(e=>e.staffId===id).sort((a,b)=>(b.month||'').localeCompare(a.month||''));
-  const avgScore = evals.length ? (evals.reduce((s2,e)=>s2+Number(e.overall||0),0)/evals.length).toFixed(1) : '—';
+  const kpiRecs = DB.kpiAssessments.filter(a=>a.staffId===id && a.finalPercent!==null && a.finalPercent!==undefined).sort((a,b)=>(b.month||'').localeCompare(a.month||''));
+  const avgKpi = kpiRecs.length ? (kpiRecs.reduce((s2,e)=>s2+e.finalPercent,0)/kpiRecs.length) : null;
   const allowancesTotal = DB.allowances.filter(a=>a.staffId===id).reduce((s2,a)=>s2+Number(a.amount||0),0);
+  const thisMonth = todayISO().slice(0,7);
   openModal(`
     <div class="modal-head"><h3>👤 Profaili ya ${esc(s.name)}</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
@@ -3027,11 +3017,11 @@ function openStaffProfile(id){
       </div>
       <div class="small">Jumla ya Posho Alizolipwa: <b>${fmtMoney(allowancesTotal)}</b></div>
       <div class="divider"></div>
-      <div class="flex-between"><h4 style="margin:10px 0 6px;">⭐ Tathmini/KPI ya Kila Mwezi</h4>
-        <button class="btn ghost sm" onclick="openEvaluationForm('${id}')">➕ Ongeza Tathmini</button></div>
-      <div class="small" style="margin-bottom:6px;">Wastani wa Alama Zote: <b>${avgScore}${evals.length?'/5':''}</b></div>
-      <div class="table-wrap"><table><thead><tr><th>Mwezi</th><th>Mahudhurio</th><th>Ubora</th><th>Nidhamu</th><th>Timu</th><th>Wastani</th></tr></thead>
-      <tbody>${evals.map(e=>`<tr><td>${esc(e.month)}</td><td>${e.attendance}</td><td>${e.quality}</td><td>${e.discipline}</td><td>${e.teamwork}</td><td style="font-weight:700;">${e.overall}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna tathmini bado</td></tr>`}</tbody></table></div>
+      <div class="flex-between"><h4 style="margin:10px 0 6px;">⭐ Tathmini ya KPI (Karakana)</h4>
+        ${s.kpiPosition?`<button class="btn ghost sm" onclick="closeModal();openKpiAssessmentForm('${id}','${thisMonth}')">📝 Tathmini ya Mwezi Huu</button>`:'<span class="small" style="color:var(--red);">Hana Nafasi ya KPI — hariri mfanyakazi kuweka</span>'}</div>
+      <div class="small" style="margin-bottom:6px;">Wastani wa Miezi Yote: <b>${avgKpi!==null?avgKpi.toFixed(1)+'%':'—'}</b></div>
+      <div class="table-wrap"><table><thead><tr><th>Mwezi</th><th>Alama</th><th>Grade</th></tr></thead>
+      <tbody>${kpiRecs.map(r=>{const g=gradeFromPercent(r.finalPercent);return `<tr><td>${esc(r.month)}</td><td style="font-weight:700;">${r.finalPercent.toFixed(1)}%</td><td><span class="badge ${g.cls} dot">${g.letter} — ${g.label}</span></td></tr>`;}).join('') || `<tr><td colspan="3" class="empty">Hakuna tathmini bado</td></tr>`}</tbody></table></div>
       <div class="divider"></div>
       <div class="flex-between"><h4 style="margin:10px 0 6px;">⚠️ Maonyo (Warnings)</h4>
         <button class="btn ghost sm" onclick="openWarningForm('${id}')">➕ Toa Onyo</button></div>
@@ -3140,13 +3130,13 @@ function addKpiRow(posKey){
   const t = DB.kpiTemplates[posKey];
   if(!t) return;
   t.kpis.push({key:'custom_'+Date.now(), label:'KPI Mpya', weight:0});
-  renderKpiSettings(document.getElementById('view_kpisettings'));
+  renderKpiSettings(document.getElementById('kpiHubBody'));
 }
 function removeKpiRow(posKey, idx){
   const t = DB.kpiTemplates[posKey];
   if(!t) return;
   t.kpis.splice(idx,1);
-  renderKpiSettings(document.getElementById('view_kpisettings'));
+  renderKpiSettings(document.getElementById('kpiHubBody'));
 }
 function saveKpiTemplate(posKey){
   const t = DB.kpiTemplates[posKey];
@@ -3157,12 +3147,32 @@ function saveKpiTemplate(posKey){
 
 /* ============================== TATHMINI YA KARAKANA: TATHMINI ZA MWEZI ============================== */
 let kpiFilterMonth = todayISO().slice(0,7);
+let kpiActiveTab = 'assessment';
+/** Ukurasa mmoja wa "Tathmini ya KPI" wenye vichupo (badala ya kurasa 4 tofauti kwenye menu) - Tathmini,
+ *  Dashibodi, Ripoti, na Mipangilio (Mipangilio inaonekana kwa Admin pekee). */
+function renderKpiHub(el){
+  el.innerHTML = `
+  <div class="pill-tabs" style="margin-bottom:16px;">
+    <div class="pill-tab ${kpiActiveTab==='assessment'?'active':''}" onclick="setKpiTab('assessment')">📝 Tathmini za Mwezi</div>
+    <div class="pill-tab ${kpiActiveTab==='dashboard'?'active':''}" onclick="setKpiTab('dashboard')">📶 Dashibodi</div>
+    <div class="pill-tab ${kpiActiveTab==='reports'?'active':''}" onclick="setKpiTab('reports')">📑 Ripoti</div>
+    ${currentUser.isAdmin?`<div class="pill-tab ${kpiActiveTab==='settings'?'active':''}" onclick="setKpiTab('settings')">⚙️ Mipangilio</div>`:''}
+  </div>
+  <div id="kpiHubBody"></div>
+  `;
+  const body = document.getElementById('kpiHubBody');
+  if(kpiActiveTab==='assessment') renderKpiAssessment(body);
+  else if(kpiActiveTab==='dashboard') renderKpiDashboard(body);
+  else if(kpiActiveTab==='reports') renderKpiReports(body);
+  else if(kpiActiveTab==='settings') renderKpiSettings(body);
+}
+function setKpiTab(tab){ kpiActiveTab = tab; renderKpiHub(document.getElementById('view_kpi')); }
 function renderKpiAssessment(el){
   const staffWithPosition = DB.staff.filter(s=>s.kpiPosition);
   const records = DB.kpiAssessments.filter(a=>a.month===kpiFilterMonth);
   el.innerHTML = `
   <div class="flex-between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
-    <div class="field" style="margin:0;"><label>Chagua Mwezi</label><input type="month" value="${kpiFilterMonth}" onchange="kpiFilterMonth=this.value;renderKpiAssessment(document.getElementById('view_kpiassessment'))"></div>
+    <div class="field" style="margin:0;"><label>Chagua Mwezi</label><input type="month" value="${kpiFilterMonth}" onchange="kpiFilterMonth=this.value;renderKpiAssessment(document.getElementById('kpiHubBody'))"></div>
   </div>
   ${staffWithPosition.length===0?`<div class="empty">Hakuna mfanyakazi mwenye "Nafasi ya Tathmini ya KPI" iliyowekwa bado. Nenda Wafanyakazi → Hariri → weka Nafasi ya KPI.</div>`:''}
   <div class="grid grid-2" style="gap:14px;">
@@ -3274,7 +3284,7 @@ function saveKpiAssessment(staffId, month){
   if(rec.grade==='D' || rec.grade==='E'){
     toast("Hii inahitaji Mpango wa Kuboresha Utendaji (PIP) — fungua tathmini hii tena kuandika mpango","amber");
   }
-  renderKpiAssessment(document.getElementById('view_kpiassessment'));
+  renderKpiAssessment(document.getElementById('kpiHubBody'));
 }
 
 /* ============================== TATHMINI YA KARAKANA: DASHIBODI ============================== */
@@ -3309,7 +3319,7 @@ function renderKpiDashboard(el){
   const trendData = trendMonths.map(m=>kpiMonthlyAverage(m));
 
   el.innerHTML = `
-  <div class="field" style="max-width:220px;margin-bottom:16px;"><label>Chagua Mwezi</label><input type="month" value="${month}" onchange="kpiFilterMonth=this.value;renderKpiDashboard(document.getElementById('view_kpidashboard'))"></div>
+  <div class="field" style="max-width:220px;margin-bottom:16px;"><label>Chagua Mwezi</label><input type="month" value="${month}" onchange="kpiFilterMonth=this.value;renderKpiDashboard(document.getElementById('kpiHubBody'))"></div>
   <div class="grid grid-4" style="margin-bottom:16px;">
     <div class="card stat blue"><div class="stat-bar"></div><div class="stat-label">Wastani wa Karakana Nzima</div><div class="stat-value">${overall!==null?overall.toFixed(1)+'%':'—'}</div></div>
     <div class="card stat amber"><div class="stat-bar"></div><div class="stat-label">Wastani wa Mafundi</div><div class="stat-value">${mafundiAvg!==null?mafundiAvg.toFixed(1)+'%':'—'}</div></div>
@@ -3367,7 +3377,7 @@ function renderKpiReports(el){
         <select id="kr_staffId" onchange="renderKpiReportBody()">${DB.staff.filter(s=>s.kpiPosition).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
       </div>
     </div>
-    <button class="btn amber" onclick="printSection('view_kpireports')">🖨️ Chapisha Ripoti Hii</button>
+    <button class="btn amber" onclick="printSection('view_kpi')">🖨️ Chapisha Ripoti Hii</button>
   </div>
   <div class="card card-pad" id="kpiReportBody"></div>
   `;
