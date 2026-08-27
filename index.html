@@ -309,7 +309,9 @@ function defaultDB(){
     expenditures: [],          // Matumizi: {id, category('office_consumables'|'materials'|'workshop_repair'|'tools_equipment'|'other'), description, amount, date, note, createdAt}
     staffWarnings: [],         // Maonyo kwa mtumishi: {id, staffId, date, reason, issuedBy, createdAt}
     staffEvaluations: [],      // Tathmini/KPI ya kila mwezi: {id, staffId, month, attendance, quality, discipline, teamwork, output, comments, evaluatedBy, createdAt}
-    appointments: []           // Vikao/Ratiba za Meneja: {id, title, date, time, location, note, createdAt}
+    appointments: [],          // Vikao/Ratiba za Meneja: {id, title, date, time, location, note, createdAt}
+    kpiTemplates: {},          // Uzito (weights) wa KPI kwa kila nafasi - seedwa kutoka KPI_POSITIONS, unabadilika kwenye Mipangilio
+    kpiAssessments: []         // Tathmini za kila mwezi: {id, staffId, positionKey, month, kpiScores[], cleanliness{}, selfDone, selfComments, supervisorDone, supervisorComments, finalPercent, grade, pip, evaluatedBy, createdAt}
   };
 }
 
@@ -385,6 +387,15 @@ function migrateDB(d){
   d.users.forEach(u=>{
     if(u.canEdit===undefined) u.canEdit = !!u.isAdmin;
     if(u.canDelete===undefined) u.canDelete = !!u.isAdmin;
+  });
+  // Seed KPI templates (mara ya kwanza tu, au kama nafasi mpya imeongezwa kwenye KPI_POSITIONS baadaye)
+  d.kpiTemplates = d.kpiTemplates || {};
+  Object.keys(KPI_POSITIONS).forEach(key=>{
+    if(!d.kpiTemplates[key]){
+      const base = KPI_POSITIONS[key];
+      d.kpiTemplates[key] = { label: base.label, category: base.category, extraCleanliness: base.extraCleanliness,
+        customizable: base.customizable, kpis: base.kpis.map(k=>({...k})) };
+    }
   });
   // Old spare-parts records only had vehicleId + cost + status — upgrade them to the fuller INVENTORY shape.
   d.spareParts.forEach(p=>{
@@ -647,6 +658,109 @@ const DEPT_ROLES = {
 };
 const CUSTOM_ROLE_OPTION = "__nyingine__";
 
+/* ============================== TATHMINI YA KARAKANA (KPI SYSTEM) ============================== */
+/** Orodha rasmi ya KPI za Mafundi (Mechanics, Auto-Electricians, Welders/Fabricators, Painters,
+ *  Tyre/Service Technicians, Other Technical Staff) - ZINAFANANA kwa makundi yote ya kiufundi.
+ *  MUHIMU: usifute wala kupunguza hizi - Msimamizi anaweza tu KUBADILISHA UZITO (weight) kupitia
+ *  "Mipangilio ya KPI", mradi jumla iendelee kuwa 100%. */
+const MAFUNDI_KPI_LIST = [
+  {key:'jobs_completed', label:'Jobs Completed / Productivity', weight:20},
+  {key:'quality_fix', label:'Quality / First-Time Fix', weight:15},
+  {key:'labour_efficiency', label:'Labour Efficiency', weight:15},
+  {key:'turnaround_time', label:'Turnaround Time', weight:10},
+  {key:'preventive_maintenance', label:'Preventive Maintenance', weight:10},
+  {key:'safety_compliance', label:'Safety Compliance', weight:10},
+  {key:'tools_parts_mgmt', label:'Tools & Spare Parts Management', weight:5},
+  {key:'documentation', label:'Documentation / Job Cards', weight:5},
+  {key:'attendance_discipline', label:'Attendance & Discipline', weight:5},
+  {key:'teamwork_service', label:'Teamwork / Customer Service', weight:5}
+];
+const STOREKEEPER_KPI_LIST = [
+  {key:'stock_accuracy', label:'Stock Accuracy', weight:15},
+  {key:'issuing_efficiency', label:'Issuing Efficiency', weight:15},
+  {key:'stock_records', label:'Stock Records', weight:10},
+  {key:'stock_availability', label:'Stock Availability', weight:15},
+  {key:'grn_accuracy', label:'GRN / Receiving Accuracy', weight:15},
+  {key:'compliance', label:'Compliance', weight:10},
+  {key:'cleanliness_store', label:'Usafi wa Store / Mazingira', weight:10},
+  {key:'discipline', label:'Discipline', weight:5},
+  {key:'teamwork', label:'Teamwork', weight:5}
+];
+const PROCUREMENT_KPI_LIST = [
+  {key:'procurement_turnaround', label:'Procurement Turnaround', weight:20},
+  {key:'procurement_compliance', label:'Procurement Compliance', weight:15},
+  {key:'supplier_mgmt', label:'Supplier Management', weight:15},
+  {key:'documentation', label:'Documentation', weight:15},
+  {key:'value_for_money', label:'Value for Money', weight:15},
+  {key:'timeliness', label:'Timeliness', weight:10},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
+  {key:'discipline', label:'Discipline', weight:5}
+];
+const ACCOUNTANT_KPI_LIST = [
+  {key:'transaction_accuracy', label:'Transaction Accuracy', weight:20},
+  {key:'reconciliation', label:'Reconciliation', weight:15},
+  {key:'timely_reporting', label:'Timely Reporting', weight:15},
+  {key:'records', label:'Records', weight:15},
+  {key:'compliance', label:'Compliance', weight:15},
+  {key:'customer_service', label:'Customer / Internal Service', weight:10},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
+  {key:'discipline', label:'Discipline', weight:5}
+];
+const SECRETARY_KPI_LIST = [
+  {key:'reports_correspondence', label:'Reports / Correspondence', weight:20},
+  {key:'data_accuracy', label:'Data Accuracy', weight:15},
+  {key:'filing_records', label:'Filing / Records', weight:15},
+  {key:'timeliness', label:'Timeliness', weight:15},
+  {key:'customer_service', label:'Customer Service', weight:15},
+  {key:'office_support', label:'Office Support', weight:10},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
+  {key:'discipline', label:'Discipline', weight:5}
+];
+/** Nafasi ambazo hazina KPI maalum kwenye taratibu - Msimamizi anaweka KPI zake mwenyewe kupitia
+ *  Mipangilio ya KPI. Tumeweka default ya kuanzia inayotumika mpaka aibadilishe. */
+const GENERIC_SUPPORTING_KPI_LIST = [
+  {key:'quality_of_work', label:'Ubora wa Kazi', weight:25},
+  {key:'timeliness', label:'Utimilifu wa Muda', weight:20},
+  {key:'compliance', label:'Kufuata Taratibu (Compliance)', weight:15},
+  {key:'attendance', label:'Mahudhurio', weight:15},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:10},
+  {key:'discipline', label:'Nidhamu', weight:10},
+  {key:'teamwork', label:'Ushirikiano Timu', weight:5}
+];
+/** Ramani ya nafasi (position) kwenda kwenye KPI list yake. "category" inatumika kwenye Dashibodi
+ *  kutofautisha Mafundi na Supporting Staff. "extraCleanliness" = true kwa Mafundi maana yake Usafi
+ *  Binafsi & Mazingira ni KIPIMO CHA ZIADA (hakihesabiwi kwenye 100%) - kwa Supporting Staff tayari
+ *  kimo ndani ya orodha yao kuu (kwenye 100%). */
+const KPI_POSITIONS = {
+  mechanic: {label:'Mechanic', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  auto_electrician: {label:'Auto-Electrician', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  welder: {label:'Welder / Fabricator', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  painter: {label:'Painter', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  tyre_technician: {label:'Tyre / Service Technician', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  other_technical: {label:'Other Technical Staff', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  storekeeper: {label:'Storekeeper', category:'supporting', kpis:STOREKEEPER_KPI_LIST, extraCleanliness:false, customizable:true},
+  procurement: {label:'Procurement', category:'supporting', kpis:PROCUREMENT_KPI_LIST, extraCleanliness:false, customizable:true},
+  accountant: {label:'Accountant / Cashier', category:'supporting', kpis:ACCOUNTANT_KPI_LIST, extraCleanliness:false, customizable:true},
+  secretary_admin: {label:'Secretary / Admin / Reception', category:'supporting', kpis:SECRETARY_KPI_LIST, extraCleanliness:false, customizable:true},
+  ict: {label:'ICT', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
+  cleaner: {label:'Cleaner', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
+  security: {label:'Security', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
+  other_supporting: {label:'Other Supporting Staff', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true}
+};
+/** Vitu vinavyopimwa ndani ya "Usafi Binafsi" na "Mazingira" (kwa Mafundi, kama kipimo cha ziada). */
+const CLEANLINESS_PERSONAL_ITEMS = ['Mavazi/Workwear','PPE','Mwonekano','Viatu vya Kazi','Usafi wa Mwili/Mikono'];
+const CLEANLINESS_ENV_ITEMS = ['Workstation','Garage Floor','Oil/Grease Spills','Tools Arrangement','Waste Disposal','Oil/Chemical Disposal','Passageways','Usafi wa Ofisi/Store/Workshop','General Housekeeping'];
+function gradeFromPercent(pct){
+  if(pct>=90) return {letter:'A', label:'Outstanding', cls:'green'};
+  if(pct>=80) return {letter:'B', label:'Very Good', cls:'blue'};
+  if(pct>=70) return {letter:'C', label:'Good', cls:'blue'};
+  if(pct>=60) return {letter:'D', label:'Needs Improvement', cls:'amber'};
+  return {letter:'E', label:'Unsatisfactory', cls:'red'};
+}
+function kpiTemplateFor(positionKey){
+  return (DB.kpiTemplates && DB.kpiTemplates[positionKey]) || KPI_POSITIONS[positionKey] || null;
+}
+
 /** Roles eligible to be assigned to a vehicle job — anyone in the UKAGUZI or MATENGENEZO department, regardless of exact title. */
 function assignableStaff(){ return DB.staff.filter(s=> s.dept==='UKAGUZI' || s.dept==='MATENGENEZO'); }
 /** Wafanyakazi wa kuchagulika kwa kazi ya gari: Wakaguzi na Mafundi wa Matengenezo WOTE wanaonekana (ili
@@ -758,6 +872,12 @@ const NAV = [
     {id:"performance", label:"Utendaji & Mafundi Bora", ic:"🏆"},
     {id:"allowances", label:"Posho (Allowances)", ic:"💵"},
   ]},
+  {group:"Tathmini ya Karakana (KPI)", items:[
+    {id:"kpiassessment", label:"Tathmini za Kila Mwezi", ic:"📝"},
+    {id:"kpidashboard", label:"Dashibodi ya Utendaji", ic:"📶"},
+    {id:"kpireports", label:"Ripoti za KPI", ic:"📑"},
+    {id:"kpisettings", label:"Mipangilio ya KPI", ic:"⚙️"},
+  ]},
   {group:"Fedha", items:[
     {id:"finance", label:"Mapato & Malipo", ic:"💰"},
     {id:"expenditures", label:"Matumizi (Expenditures)", ic:"🧾"},
@@ -802,13 +922,17 @@ const PAGE_META = {
   reports:["Ripoti","Chagua ripoti na uichapishe"],
   users:["Watumiaji & Ruhusa","Simamia akaunti za watumiaji na wanachoweza kuona/kufanya"],
   appointments:["Vikao & Ratiba za Meneja","Panga na fuatilia vikao na ratiba za nje"],
+  kpiassessment:["Tathmini za Kila Mwezi","Fanya tathmini ya utendaji ya kila mtumishi kwa mwezi"],
+  kpidashboard:["Dashibodi ya Utendaji","Muhtasari wa utendaji wa karakana nzima"],
+  kpireports:["Ripoti za KPI","Chapisha ripoti za utendaji"],
+  kpisettings:["Mipangilio ya KPI","Badilisha uzito (weights) wa kila KPI kwa kila nafasi"],
 };
 
 /* ---------------------------- ACCOUNTS / PERMISSIONS ---------------------------- */
 const ALL_MODULES = NAV.flatMap(g=>g.items).filter(i=>i.id!=='users');
 const ROLE_PRESETS = {
   "Msimamizi (Full Access)": {isAdmin:true, modules: ALL_MODULES.map(m=>m.id)},
-  "Meneja wa Mkoa": {isAdmin:false, modules: ['dashboard','vehicles','mifumo','staff','performance','allowances','finance','expenditures','profitloss','reports','feedback','valuation','tradetest','parkingfees','roadworthiness','boardingoff','appointments']},
+  "Meneja wa Mkoa": {isAdmin:false, modules: ['dashboard','vehicles','mifumo','staff','performance','allowances','finance','expenditures','profitloss','reports','feedback','valuation','tradetest','parkingfees','roadworthiness','boardingoff','appointments','kpiassessment','kpidashboard','kpireports','kpisettings']},
   "Mhasibu": {isAdmin:false, modules: ['dashboard','finance','expenditures','profitloss','allowances','reports','parkingfees']},
   "Mgavi": {isAdmin:false, modules: ['dashboard','parts','consumables']},
   "Fundi wa Ukaguzi": {isAdmin:false, modules: ['dashboard','vehicles','roadworthiness','feedback']},
@@ -943,6 +1067,10 @@ function render(){
     reports: renderReports,
     users: renderUsers,
     appointments: renderAppointments,
+    kpiassessment: renderKpiAssessment,
+    kpidashboard: renderKpiDashboard,
+    kpireports: renderKpiReports,
+    kpisettings: renderKpiSettings,
   }[currentView];
   const content = document.getElementById('content');
   let el = document.getElementById('view_'+currentView);
@@ -2418,6 +2546,19 @@ function openStaffForm(id){
       </div>
       <span class="opt">Hizi ni kiasi cha "default" tu — vinaweza kubadilishwa kwa mtu mmoja mmoja wakati wa kutoa posho za mwezi.</span>
       <div class="form-row" style="margin-top:10px;">
+        <div class="field"><label>Nafasi ya Tathmini ya KPI (Karakana)</label>
+          <select id="st_kpiPosition">
+            <option value="">— Haijawekwa —</option>
+            <optgroup label="Mafundi">
+              ${Object.keys(KPI_POSITIONS).filter(k=>KPI_POSITIONS[k].category==='mafundi').map(k=>`<option value="${k}" ${s&&s.kpiPosition===k?'selected':''}>${KPI_POSITIONS[k].label}</option>`).join('')}
+            </optgroup>
+            <optgroup label="Supporting Staff">
+              ${Object.keys(KPI_POSITIONS).filter(k=>KPI_POSITIONS[k].category==='supporting').map(k=>`<option value="${k}" ${s&&s.kpiPosition===k?'selected':''}>${KPI_POSITIONS[k].label}</option>`).join('')}
+            </optgroup>
+          </select>
+        </div>
+      </div>
+      <div class="form-row" style="margin-top:10px;">
         <div class="field"><label>Kitengo *</label>
           <select id="st_dept" onchange="fillRoleOptions(this.value, '${s?esc(s.role):''}')">
             ${Object.keys(DEPTS).map(k=>`<option value="${k}" ${s&&s.dept===k?'selected':''}>${DEPTS[k]}</option>`).join('')}
@@ -2511,6 +2652,7 @@ function saveStaff(id){
     emergencyContact: document.getElementById('st_emergency').value.trim(),
     lunchAllowanceDefault: Number(document.getElementById('st_lunchDefault').value)||0,
     transportAllowanceDefault: Number(document.getElementById('st_transportDefault').value)||0,
+    kpiPosition: document.getElementById('st_kpiPosition').value || null,
     dept, role,
     annualBudget: isManager ? (vehicleBudget+mifumoBudget) : (Number(document.getElementById('st_budget').value)||0),
     vehicleBudget, mifumoBudget
@@ -2949,6 +3091,330 @@ function saveEvaluation(staffId){
     comments:document.getElementById('ev_comments').value.trim(), evaluatedBy: currentUser?currentUser.fullName:'', createdAt:nowTime()});
   saveDB(); toast("Tathmini imehifadhiwa","green");
   openStaffProfile(staffId);
+}
+
+/* ============================== TATHMINI YA KARAKANA: MIPANGILIO (KPI SETTINGS) ============================== */
+function renderKpiSettings(el){
+  if(!currentUser.isAdmin){
+    el.innerHTML = `<div class="empty">Sehemu hii ni ya Msimamizi (Admin) pekee.</div>`;
+    return;
+  }
+  const keys = Object.keys(DB.kpiTemplates);
+  el.innerHTML = `
+  <div class="small" style="margin-bottom:14px;color:var(--slate);">Hapa unaweza kubadilisha uzito (weight %) wa kila KPI kwa kila nafasi. Kila nafasi lazima jumla ya uzito iwe <b>100%</b> kabla ya kuhifadhi. Kwa nafasi za "Supporting Staff" zenye alama ya ✏️, unaweza pia kuongeza/kufuta KPI kabisa.</div>
+  ${['mafundi','supporting'].map(cat=>`
+    <h3 style="margin:16px 0 8px;">${cat==='mafundi'?'👷 Mafundi':'🗂️ Supporting Staff'}</h3>
+    <div class="grid grid-2" style="gap:14px;">
+    ${keys.filter(k=>DB.kpiTemplates[k].category===cat).map(k=>{
+      const t = DB.kpiTemplates[k];
+      const total = t.kpis.reduce((s,x)=>s+Number(x.weight||0),0);
+      return `<div class="card">
+        <div class="card-head"><h3>${esc(t.label)}</h3><span class="badge ${total===100?'green':'red'} dot" id="kt_total_${k}">${total}%</span></div>
+        <div class="card-pad" id="kt_rows_${k}">
+          ${t.kpis.map((kpi,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <input type="text" value="${esc(kpi.label)}" ${t.customizable?'':'readonly'} onchange="updateKpiRow('${k}',${i},'label',this.value)" style="flex:1;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;${t.customizable?'':'background:#F3F4F6;'}">
+            <input type="number" value="${kpi.weight}" onchange="updateKpiRow('${k}',${i},'weight',this.value)" style="width:64px;padding:5px 6px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;">%
+            ${t.customizable?`<button class="btn ghost sm" onclick="removeKpiRow('${k}',${i})">✕</button>`:''}
+          </div>`).join('')}
+        </div>
+        ${t.extraCleanliness?'<div class="small" style="color:var(--slate);">+ Usafi Binafsi &amp; Mazingira (KPI ya ziada, haihesabiwi kwenye 100%)</div>':''}
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          ${t.customizable?`<button class="btn ghost sm" onclick="addKpiRow('${k}')">➕ Ongeza KPI</button>`:''}
+          <button class="btn amber sm" onclick="saveKpiTemplate('${k}')">💾 Hifadhi</button>
+        </div>
+      </div>`;
+    }).join('')}
+    </div>
+  `).join('')}
+  `;
+}
+function updateKpiRow(posKey, idx, field, value){
+  const t = DB.kpiTemplates[posKey];
+  if(!t || !t.kpis[idx]) return;
+  t.kpis[idx][field] = field==='weight' ? Number(value)||0 : value;
+  const total = t.kpis.reduce((s,x)=>s+Number(x.weight||0),0);
+  const badge = document.getElementById('kt_total_'+posKey);
+  if(badge){ badge.textContent = total+'%'; badge.className = 'badge '+(total===100?'green':'red')+' dot'; }
+}
+function addKpiRow(posKey){
+  const t = DB.kpiTemplates[posKey];
+  if(!t) return;
+  t.kpis.push({key:'custom_'+Date.now(), label:'KPI Mpya', weight:0});
+  renderKpiSettings(document.getElementById('view_kpisettings'));
+}
+function removeKpiRow(posKey, idx){
+  const t = DB.kpiTemplates[posKey];
+  if(!t) return;
+  t.kpis.splice(idx,1);
+  renderKpiSettings(document.getElementById('view_kpisettings'));
+}
+function saveKpiTemplate(posKey){
+  const t = DB.kpiTemplates[posKey];
+  const total = t.kpis.reduce((s,x)=>s+Number(x.weight||0),0);
+  if(total!==100){ toast(`Jumla ya uzito wa "${t.label}" ni ${total}% — lazima iwe 100% kabla ya kuhifadhi.`,"red"); return; }
+  saveDB(); toast(`Mipangilio ya "${t.label}" imehifadhiwa`,"green");
+}
+
+/* ============================== TATHMINI YA KARAKANA: TATHMINI ZA MWEZI ============================== */
+let kpiFilterMonth = todayISO().slice(0,7);
+function renderKpiAssessment(el){
+  const staffWithPosition = DB.staff.filter(s=>s.kpiPosition);
+  const records = DB.kpiAssessments.filter(a=>a.month===kpiFilterMonth);
+  el.innerHTML = `
+  <div class="flex-between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+    <div class="field" style="margin:0;"><label>Chagua Mwezi</label><input type="month" value="${kpiFilterMonth}" onchange="kpiFilterMonth=this.value;renderKpiAssessment(document.getElementById('view_kpiassessment'))"></div>
+  </div>
+  ${staffWithPosition.length===0?`<div class="empty">Hakuna mfanyakazi mwenye "Nafasi ya Tathmini ya KPI" iliyowekwa bado. Nenda Wafanyakazi → Hariri → weka Nafasi ya KPI.</div>`:''}
+  <div class="grid grid-2" style="gap:14px;">
+    ${['mafundi','supporting'].map(cat=>{
+      const list = staffWithPosition.filter(s=>{ const t=kpiTemplateFor(s.kpiPosition); return t && t.category===cat; });
+      if(list.length===0) return '';
+      return `<div class="card">
+        <div class="card-head"><h3>${cat==='mafundi'?'👷 Mafundi':'🗂️ Supporting Staff'}</h3></div>
+        <div class="table-wrap"><table><thead><tr><th>Jina</th><th>Nafasi</th><th>Hali</th><th></th></tr></thead>
+        <tbody>${list.map(s=>{
+          const rec = records.find(r=>r.staffId===s.id);
+          const status = !rec ? '<span class="badge gray dot">Haijaanza</span>' : (rec.finalPercent!==undefined&&rec.finalPercent!==null ? `<span class="badge ${gradeFromPercent(rec.finalPercent).cls} dot">${rec.finalPercent.toFixed(0)}% (${gradeFromPercent(rec.finalPercent).letter})</span>` : '<span class="badge amber dot">Inaendelea</span>');
+          return `<tr><td style="font-weight:700;">${esc(s.name)}</td><td class="small">${kpiTemplateFor(s.kpiPosition).label}</td><td>${status}</td>
+            <td style="text-align:right;"><button class="btn secondary sm" onclick="openKpiAssessmentForm('${s.id}','${kpiFilterMonth}')">${rec?'Fungua':'Anza'}</button></td></tr>`;
+        }).join('')}</tbody></table></div>
+      </div>`;
+    }).join('')}
+  </div>
+  `;
+}
+function findOrDraftKpiAssessment(staffId, month){
+  let rec = DB.kpiAssessments.find(a=>a.staffId===staffId && a.month===month);
+  if(rec) return rec;
+  const s = staffById(staffId);
+  const t = kpiTemplateFor(s.kpiPosition);
+  return {
+    id: null, staffId, positionKey: s.kpiPosition, month,
+    kpiScores: t.kpis.map(k=>({key:k.key, label:k.label, weight:k.weight, target:'', actual:'', evidence:'', selfScore:null, supervisorScore:null})),
+    cleanliness: t.extraCleanliness ? {personal:null, environment:null, note:''} : null,
+    selfComments:'', supervisorComments:'', finalPercent:null, grade:null, pip:'', evaluatedBy:'', createdAt:null
+  };
+}
+function openKpiAssessmentForm(staffId, month){
+  const s = staffById(staffId);
+  if(!s || !s.kpiPosition){ toast("Mfanyakazi huyu hana Nafasi ya KPI iliyowekwa","red"); return; }
+  const t = kpiTemplateFor(s.kpiPosition);
+  const rec = findOrDraftKpiAssessment(staffId, month);
+  openModal(`
+    <div class="modal-head"><h3>📝 Tathmini ya ${esc(s.name)} — ${esc(month)}</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body" id="kpiFormBody" style="max-height:70vh;overflow-y:auto;">
+      <div class="small" style="margin-bottom:10px;color:var(--slate);">Nafasi: <b>${t.label}</b> · Kila KPI: alama 1 (Unsatisfactory) mpaka 5 (Outstanding)</div>
+      <div class="table-wrap"><table><thead><tr><th>KPI</th><th>Uzito</th><th>Target</th><th>Actual</th><th>Ushahidi</th><th>Kujitathmini</th><th>Msimamizi</th></tr></thead>
+      <tbody>${rec.kpiScores.map((k,i)=>`<tr>
+        <td style="font-weight:700;">${esc(k.label)}</td>
+        <td>${k.weight}%</td>
+        <td><input id="kpi_target_${i}" value="${esc(k.target||'')}" style="width:80px;padding:4px 6px;font-size:12px;border:1px solid var(--line);border-radius:5px;"></td>
+        <td><input id="kpi_actual_${i}" value="${esc(k.actual||'')}" style="width:80px;padding:4px 6px;font-size:12px;border:1px solid var(--line);border-radius:5px;"></td>
+        <td><input id="kpi_evidence_${i}" value="${esc(k.evidence||'')}" placeholder="maelezo/uthibitisho" style="width:120px;padding:4px 6px;font-size:12px;border:1px solid var(--line);border-radius:5px;"></td>
+        <td><select id="kpi_self_${i}" style="padding:4px;font-size:12px;">${[1,2,3,4,5].map(n=>`<option value="${n}" ${k.selfScore===n?'selected':''}>${n}</option>`).join('')}<option value="" ${!k.selfScore?'selected':''}>—</option></select></td>
+        <td><select id="kpi_sup_${i}" style="padding:4px;font-size:12px;">${[1,2,3,4,5].map(n=>`<option value="${n}" ${k.supervisorScore===n?'selected':''}>${n}</option>`).join('')}<option value="" ${!k.supervisorScore?'selected':''}>—</option></select></td>
+      </tr>`).join('')}</tbody></table></div>
+      ${t.extraCleanliness ? `
+      <div class="divider"></div>
+      <h4 style="margin:10px 0 6px;">🧹 Usafi Binafsi &amp; Mazingira (KPI ya Ziada — haiathiri 100% kuu)</h4>
+      <div class="small" style="margin-bottom:6px;">Usafi Binafsi: ${CLEANLINESS_PERSONAL_ITEMS.join(', ')}</div>
+      <div class="small" style="margin-bottom:6px;">Mazingira: ${CLEANLINESS_ENV_ITEMS.join(', ')}</div>
+      <div class="form-row">
+        <div class="field"><label>Alama ya Usafi Binafsi (1-5)</label><select id="kpi_clean_personal">${[1,2,3,4,5].map(n=>`<option value="${n}" ${rec.cleanliness&&rec.cleanliness.personal===n?'selected':''}>${n}</option>`).join('')}<option value="" ${!(rec.cleanliness&&rec.cleanliness.personal)?'selected':''}>—</option></select></div>
+        <div class="field"><label>Alama ya Mazingira (1-5)</label><select id="kpi_clean_env">${[1,2,3,4,5].map(n=>`<option value="${n}" ${rec.cleanliness&&rec.cleanliness.environment===n?'selected':''}>${n}</option>`).join('')}<option value="" ${!(rec.cleanliness&&rec.cleanliness.environment)?'selected':''}>—</option></select></div>
+      </div>
+      <div class="field"><label>Maelezo ya Ukaguzi</label><input id="kpi_clean_note" value="${esc((rec.cleanliness&&rec.cleanliness.note)||'')}"></div>
+      ` : ''}
+      <div class="divider"></div>
+      <div class="form-row">
+        <div class="field"><label>Maoni ya Kujitathmini (na mfanyakazi)</label><textarea id="kpi_selfComments" rows="2">${esc(rec.selfComments||'')}</textarea></div>
+        <div class="field"><label>Maoni ya Msimamizi</label><textarea id="kpi_supComments" rows="2">${esc(rec.supervisorComments||'')}</textarea></div>
+      </div>
+      <div class="field"><label>Mpango wa Kuboresha Utendaji (PIP) <span class="opt">— jaza hasa kama alama ni chini ya 70%</span></label><textarea id="kpi_pip" rows="2" placeholder="Hatua zitakazochukuliwa kumsaidia mfanyakazi kuboresha...">${esc(rec.pip||'')}</textarea></div>
+      <div id="kpiFinalPreview" class="card-pad" style="background:#F3F4F6;border-radius:9px;margin-top:6px;"></div>
+    </div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveKpiAssessment('${staffId}','${month}')">💾 Hifadhi Tathmini</button></div>
+  `);
+}
+function saveKpiAssessment(staffId, month){
+  const s = staffById(staffId);
+  const t = kpiTemplateFor(s.kpiPosition);
+  let rec = DB.kpiAssessments.find(a=>a.staffId===staffId && a.month===month);
+  const isNew = !rec;
+  if(isNew) rec = findOrDraftKpiAssessment(staffId, month);
+  let weightedTotal = 0, anySupervisorScore = false;
+  rec.kpiScores.forEach((k,i)=>{
+    k.target = document.getElementById('kpi_target_'+i).value.trim();
+    k.actual = document.getElementById('kpi_actual_'+i).value.trim();
+    k.evidence = document.getElementById('kpi_evidence_'+i).value.trim();
+    const selfVal = document.getElementById('kpi_self_'+i).value;
+    const supVal = document.getElementById('kpi_sup_'+i).value;
+    k.selfScore = selfVal ? Number(selfVal) : null;
+    k.supervisorScore = supVal ? Number(supVal) : null;
+    if(k.supervisorScore){ anySupervisorScore = true; weightedTotal += (k.supervisorScore/5) * k.weight; }
+  });
+  if(t.extraCleanliness){
+    const p = document.getElementById('kpi_clean_personal').value;
+    const en = document.getElementById('kpi_clean_env').value;
+    rec.cleanliness = { personal: p?Number(p):null, environment: en?Number(en):null, note: document.getElementById('kpi_clean_note').value.trim() };
+  }
+  rec.selfComments = document.getElementById('kpi_selfComments').value.trim();
+  rec.supervisorComments = document.getElementById('kpi_supComments').value.trim();
+  rec.pip = document.getElementById('kpi_pip').value.trim();
+  if(anySupervisorScore){
+    rec.finalPercent = Math.round(weightedTotal*10)/10;
+    rec.grade = gradeFromPercent(rec.finalPercent).letter;
+  } else {
+    rec.finalPercent = null; rec.grade = null;
+  }
+  rec.evaluatedBy = currentUser ? currentUser.fullName : '';
+  if(isNew){ rec.id = uid('kpi'); rec.createdAt = nowTime(); DB.kpiAssessments.push(rec); }
+  saveDB(); closeModal();
+  toast(rec.finalPercent!==null ? `Tathmini imehifadhiwa — Alama: ${rec.finalPercent}% (${rec.grade})` : "Tathmini imehifadhiwa (bado haijakamilika kikamilifu)","green");
+  if(rec.grade==='D' || rec.grade==='E'){
+    toast("Hii inahitaji Mpango wa Kuboresha Utendaji (PIP) — fungua tathmini hii tena kuandika mpango","amber");
+  }
+  renderKpiAssessment(document.getElementById('view_kpiassessment'));
+}
+
+/* ============================== TATHMINI YA KARAKANA: DASHIBODI ============================== */
+function kpiMonthlyAverage(month, category){
+  const recs = DB.kpiAssessments.filter(a=>a.month===month && a.finalPercent!==null && a.finalPercent!==undefined)
+    .filter(a=>!category || (kpiTemplateFor(a.positionKey)||{}).category===category);
+  if(recs.length===0) return null;
+  return recs.reduce((s,r)=>s+r.finalPercent,0)/recs.length;
+}
+function renderKpiDashboard(el){
+  const month = kpiFilterMonth;
+  const overall = kpiMonthlyAverage(month);
+  const mafundiAvg = kpiMonthlyAverage(month,'mafundi');
+  const supportAvg = kpiMonthlyAverage(month,'supporting');
+  const doneCount = DB.kpiAssessments.filter(a=>a.month===month && a.finalPercent!==null).length;
+  const totalStaff = DB.staff.filter(s=>s.kpiPosition).length;
+  const monthRecs = DB.kpiAssessments.filter(a=>a.month===month && a.finalPercent!==null).slice().sort((a,b)=>b.finalPercent-a.finalPercent);
+  const top5 = monthRecs.slice(0,5);
+  const needsImprovement = monthRecs.filter(r=>r.grade==='D'||r.grade==='E');
+  // Wastani wa Alama (1-5) kwa kila KPI ya Mafundi mwezi huu - kiashiria cha Productivity/Quality/Turnaround/Safety n.k.
+  const mafundiRecs = DB.kpiAssessments.filter(a=>a.month===month && (kpiTemplateFor(a.positionKey)||{}).category==='mafundi');
+  const kpiAverages = MAFUNDI_KPI_LIST.map(base=>{
+    const scores = mafundiRecs.map(r=>{ const k=r.kpiScores.find(x=>x.key===base.key); return k&&k.supervisorScore ? k.supervisorScore : null; }).filter(v=>v!==null);
+    return { label: base.label, avg: scores.length? (scores.reduce((a,b)=>a+b,0)/scores.length) : null };
+  });
+  const cleanRecs = mafundiRecs.filter(r=>r.cleanliness && (r.cleanliness.personal||r.cleanliness.environment));
+  const cleanPersonalAvg = cleanRecs.length ? cleanRecs.reduce((s,r)=>s+(r.cleanliness.personal||0),0)/cleanRecs.filter(r=>r.cleanliness.personal).length : null;
+  const cleanEnvAvg = cleanRecs.length ? cleanRecs.reduce((s,r)=>s+(r.cleanliness.environment||0),0)/cleanRecs.filter(r=>r.cleanliness.environment).length : null;
+  // Mwelekeo wa miezi 6 iliyopita
+  const trendMonths = [];
+  for(let i=5;i>=0;i--){ const d=new Date(); d.setMonth(d.getMonth()-i); trendMonths.push(d.toISOString().slice(0,7)); }
+  const trendData = trendMonths.map(m=>kpiMonthlyAverage(m));
+
+  el.innerHTML = `
+  <div class="field" style="max-width:220px;margin-bottom:16px;"><label>Chagua Mwezi</label><input type="month" value="${month}" onchange="kpiFilterMonth=this.value;renderKpiDashboard(document.getElementById('view_kpidashboard'))"></div>
+  <div class="grid grid-4" style="margin-bottom:16px;">
+    <div class="card stat blue"><div class="stat-bar"></div><div class="stat-label">Wastani wa Karakana Nzima</div><div class="stat-value">${overall!==null?overall.toFixed(1)+'%':'—'}</div></div>
+    <div class="card stat amber"><div class="stat-bar"></div><div class="stat-label">Wastani wa Mafundi</div><div class="stat-value">${mafundiAvg!==null?mafundiAvg.toFixed(1)+'%':'—'}</div></div>
+    <div class="card stat green"><div class="stat-bar"></div><div class="stat-label">Wastani wa Supporting Staff</div><div class="stat-value">${supportAvg!==null?supportAvg.toFixed(1)+'%':'—'}</div></div>
+    <div class="card stat red"><div class="stat-bar"></div><div class="stat-label">Tathmini Zilizokamilika</div><div class="stat-value">${doneCount}/${totalStaff}</div></div>
+  </div>
+  <div class="grid grid-2" style="gap:16px;margin-bottom:16px;">
+    <div class="card">
+      <div class="card-head"><h3>🏆 Top 5 Wafanyakazi Bora</h3></div>
+      <div class="table-wrap"><table><thead><tr><th>Jina</th><th>Alama</th><th>Grade</th></tr></thead>
+      <tbody>${top5.map(r=>{const s=staffById(r.staffId);const g=gradeFromPercent(r.finalPercent);return `<tr><td style="font-weight:700;">${esc(s?s.name:'—')}</td><td>${r.finalPercent.toFixed(1)}%</td><td><span class="badge ${g.cls} dot">${g.letter} — ${g.label}</span></td></tr>`;}).join('') || `<tr><td colspan="3" class="empty">Hakuna data mwezi huu</td></tr>`}</tbody></table></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>⚠️ Wanaohitaji Kuboreshwa</h3></div>
+      <div class="table-wrap"><table><thead><tr><th>Jina</th><th>Alama</th><th>Grade</th></tr></thead>
+      <tbody>${needsImprovement.map(r=>{const s=staffById(r.staffId);const g=gradeFromPercent(r.finalPercent);return `<tr><td style="font-weight:700;">${esc(s?s.name:'—')}</td><td>${r.finalPercent.toFixed(1)}%</td><td><span class="badge ${g.cls} dot">${g.letter} — ${g.label}</span></td></tr>`;}).join('') || `<tr><td colspan="3" class="empty">Hakuna — wote wako vizuri!</td></tr>`}</tbody></table></div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-head"><h3>🔧 Viashiria vya Uzalishaji vya Mafundi (Wastani wa Alama 1-5)</h3></div>
+    <div class="card-pad"><div class="grid grid-4" style="gap:10px;">
+      ${kpiAverages.map(k=>`<div><div class="small">${esc(k.label)}</div><div style="font-weight:800;font-size:16px;">${k.avg!==null?k.avg.toFixed(1)+'/5':'—'}</div></div>`).join('')}
+      <div><div class="small">Usafi Binafsi</div><div style="font-weight:800;font-size:16px;">${cleanPersonalAvg!==null?cleanPersonalAvg.toFixed(1)+'/5':'—'}</div></div>
+      <div><div class="small">Mazingira/Usafi wa Kazi</div><div style="font-weight:800;font-size:16px;">${cleanEnvAvg!==null?cleanEnvAvg.toFixed(1)+'/5':'—'}</div></div>
+    </div></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>📈 Mwelekeo wa Utendaji — Miezi 6 Iliyopita</h3></div>
+    <div class="card-pad"><canvas id="kpiTrendChart" height="90"></canvas></div>
+  </div>
+  `;
+  setTimeout(()=>{
+    const ctx = document.getElementById('kpiTrendChart');
+    if(!ctx || typeof Chart==='undefined') return;
+    new Chart(ctx, { type:'line', data:{ labels: trendMonths, datasets:[{ label:'Wastani wa Karakana (%)', data: trendData, borderColor:'#E8871E', backgroundColor:'rgba(232,135,30,.15)', tension:.3, spanGaps:true }] }, options:{ responsive:true, scales:{ y:{ min:0, max:100 } } } });
+  }, 50);
+}
+
+/* ============================== TATHMINI YA KARAKANA: RIPOTI ============================== */
+function renderKpiReports(el){
+  el.innerHTML = `
+  <div class="card card-pad no-print" style="margin-bottom:16px;">
+    <div class="form-row">
+      <div class="field"><label>Aina ya Ripoti</label>
+        <select id="kr_type" onchange="renderKpiReportBody()">
+          <option value="individual">Individual Staff Performance</option>
+          <option value="mafundi">Technicians Performance</option>
+          <option value="supporting">Supporting Staff Performance</option>
+          <option value="garage">Monthly Garage Performance</option>
+          <option value="topbottom">Top / Bottom Performers</option>
+        </select>
+      </div>
+      <div class="field"><label>Mwezi</label><input id="kr_month" type="month" value="${kpiFilterMonth}" onchange="renderKpiReportBody()"></div>
+      <div class="field" id="kr_staffBox" style="display:none;"><label>Mfanyakazi</label>
+        <select id="kr_staffId" onchange="renderKpiReportBody()">${DB.staff.filter(s=>s.kpiPosition).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <button class="btn amber" onclick="printSection('view_kpireports')">🖨️ Chapisha Ripoti Hii</button>
+  </div>
+  <div class="card card-pad" id="kpiReportBody"></div>
+  `;
+  renderKpiReportBody();
+}
+function renderKpiReportBody(){
+  const type = document.getElementById('kr_type').value;
+  const month = document.getElementById('kr_month').value;
+  document.getElementById('kr_staffBox').style.display = type==='individual' ? 'flex' : 'none';
+  let body = reportLetterhead('Ripoti ya Tathmini ya Karakana (KPI) — '+({individual:'Mfanyakazi Mmoja',mafundi:'Mafundi',supporting:'Supporting Staff',garage:'Karakana Nzima',topbottom:'Top/Bottom Performers'})[type]+' — Mwezi: '+month, null);
+  if(type==='individual'){
+    const staffId = document.getElementById('kr_staffId').value;
+    const s = staffById(staffId);
+    const rec = DB.kpiAssessments.find(a=>a.staffId===staffId && a.month===month);
+    if(!s || !rec){ body += `<div class="empty">Hakuna tathmini ya mfanyakazi huyu mwezi huu.</div>`; }
+    else{
+      const g = rec.finalPercent!==null ? gradeFromPercent(rec.finalPercent) : null;
+      body += `<div style="margin-bottom:10px;"><b>${esc(s.name)}</b> — ${kpiTemplateFor(s.kpiPosition).label} — ${esc(month)}</div>
+      <table><thead><tr><th>KPI</th><th>Uzito</th><th>Target</th><th>Actual</th><th>Msimamizi</th></tr></thead><tbody>
+      ${rec.kpiScores.map(k=>`<tr><td>${esc(k.label)}</td><td>${k.weight}%</td><td>${esc(k.target||'—')}</td><td>${esc(k.actual||'—')}</td><td>${k.supervisorScore||'—'}</td></tr>`).join('')}
+      </tbody></table>
+      <div style="margin-top:12px;font-weight:800;font-size:16px;">ALAMA YA JUMLA: ${rec.finalPercent!==null?rec.finalPercent.toFixed(1)+'% — '+g.letter+' ('+g.label+')':'Bado haijakamilika'}</div>
+      ${rec.pip?`<div style="margin-top:10px;"><b>Mpango wa Kuboresha Utendaji:</b> ${esc(rec.pip)}</div>`:''}
+      `;
+    }
+  } else if(type==='mafundi' || type==='supporting'){
+    const recs = DB.kpiAssessments.filter(a=>a.month===month && (kpiTemplateFor(a.positionKey)||{}).category===type.replace('mafundi','mafundi').replace('supporting','supporting'))
+      .filter(a=>(kpiTemplateFor(a.positionKey)||{}).category === (type==='mafundi'?'mafundi':'supporting'));
+    body += `<table><thead><tr><th>Jina</th><th>Nafasi</th><th>Alama</th><th>Grade</th></tr></thead><tbody>
+      ${recs.map(r=>{const s=staffById(r.staffId);const g=r.finalPercent!==null?gradeFromPercent(r.finalPercent):null; return `<tr><td>${esc(s?s.name:'—')}</td><td>${kpiTemplateFor(r.positionKey).label}</td><td>${r.finalPercent!==null?r.finalPercent.toFixed(1)+'%':'—'}</td><td>${g?g.letter:'—'}</td></tr>`;}).join('') || `<tr><td colspan="4">Hakuna data</td></tr>`}
+      </tbody></table>`;
+  } else if(type==='garage'){
+    const recs = DB.kpiAssessments.filter(a=>a.month===month && a.finalPercent!==null);
+    const avg = recs.length ? recs.reduce((s,r)=>s+r.finalPercent,0)/recs.length : null;
+    body += `<table><thead><tr><th>Jina</th><th>Kundi</th><th>Alama</th><th>Grade</th></tr></thead><tbody>
+      ${recs.map(r=>{const s=staffById(r.staffId);const g=gradeFromPercent(r.finalPercent);return `<tr><td>${esc(s?s.name:'—')}</td><td>${(kpiTemplateFor(r.positionKey)||{}).category==='mafundi'?'Mafundi':'Supporting'}</td><td>${r.finalPercent.toFixed(1)}%</td><td>${g.letter}</td></tr>`;}).join('') || `<tr><td colspan="4">Hakuna data</td></tr>`}
+      </tbody></table><div style="margin-top:12px;font-weight:800;">WASTANI WA KARAKANA: ${avg!==null?avg.toFixed(1)+'%':'—'}</div>`;
+  } else if(type==='topbottom'){
+    const recs = DB.kpiAssessments.filter(a=>a.month===month && a.finalPercent!==null).slice().sort((a,b)=>b.finalPercent-a.finalPercent);
+    const top5 = recs.slice(0,5), bottom5 = recs.slice(-5).reverse();
+    body += `<h4>Top 5</h4><table><thead><tr><th>Jina</th><th>Alama</th></tr></thead><tbody>
+      ${top5.map(r=>{const s=staffById(r.staffId);return `<tr><td>${esc(s?s.name:'—')}</td><td>${r.finalPercent.toFixed(1)}%</td></tr>`;}).join('') || `<tr><td colspan="2">Hakuna data</td></tr>`}
+      </tbody></table><h4 style="margin-top:14px;">Bottom 5</h4><table><thead><tr><th>Jina</th><th>Alama</th></tr></thead><tbody>
+      ${bottom5.map(r=>{const s=staffById(r.staffId);return `<tr><td>${esc(s?s.name:'—')}</td><td>${r.finalPercent.toFixed(1)}%</td></tr>`;}).join('') || `<tr><td colspan="2">Hakuna data</td></tr>`}
+      </tbody></table>`;
+  }
+  document.getElementById('kpiReportBody').innerHTML = body;
 }
 
 /* ============================== PERFORMANCE ============================== */
