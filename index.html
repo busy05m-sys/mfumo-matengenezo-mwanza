@@ -263,6 +263,7 @@ try{
   console.error('Firebase haikuweza kuanzishwa (huenda hakuna mtandao) — mfumo utatumia nakala ya ndani pekee.', e);
 }
 let cloudReady = false;      // true baada ya upakuaji wa kwanza kukamilika
+let cloudSuspiciousEmpty = false; // true endapo database mtandaoni imeonekana tupu kimashaka (angalia bootFromCloud)
 let applyingRemoteUpdate = false; // gubbly-guard: epuka mzunguko wa saveDB<->listener
 
 /* ---------------------------- DATABASE LAYER ---------------------------- */
@@ -4845,11 +4846,56 @@ function logout(){
   renderLoginScreen();
 }
 function initAuth(){
-  if(DB.users.length===0){ renderSetupScreen(); return; }
+  if(DB.users.length===0){
+    if(cloudSuspiciousEmpty){
+      // Usalama: badala ya kumruhusu mtu "kuunda akaunti ya kwanza" (jambo ambalo lingefuta kabisa
+      // data halisi ya kila mtu mara moja aliporidhia), tunaonyesha onyo na chaguo la kujaribu tena
+      // kuunganisha na database ya mtandaoni kabla ya kuruhusu chochote kingine.
+      renderCloudRecoveryScreen();
+    } else {
+      renderSetupScreen();
+    }
+    return;
+  }
   const savedId = localStorage.getItem('temesa_current_user_id');
   const savedUser = savedId ? DB.users.find(u=>u.id===savedId && u.active!==false) : null;
   if(savedUser){ currentUser = savedUser; startApp(); }
   else { renderLoginScreen(); }
+}
+/** Skrini ya onyo/usalama - inaonekana TU endapo database mtandaoni imeonekana tupu kimashaka
+ *  (ingawa kifaa hiki kimewahi kuiona ikiwa na watumiaji halisi awali). Inazuia kuundwa kwa
+ *  akaunti mpya "ya kwanza" ambayo ingefuta data ya kila mtu bila kukusudia. */
+function renderCloudRecoveryScreen(){
+  document.getElementById('authScreen').innerHTML = `
+    <div class="auth-card">
+      <div class="auth-head">
+        <img src="${TEMESA_LOGO_SRC}" alt="TEMESA">
+        <div class="eyebrow">SERIKALI YA TANZANIA</div>
+        <h1>WAKALA WA UFUNDI NA UMEME (TEMESA)<br>MKOA WA MWANZA</h1>
+      </div>
+      <div class="auth-body">
+        <h3 style="font-size:15px;margin-bottom:4px;color:var(--red);">⚠️ Tatizo la Muunganiko na Database</h3>
+        <p class="small" style="margin-bottom:12px;">
+          Kifaa hiki kimewahi kuona mfumo huu ukiwa na watumiaji halisi, lakini kwa sasa database
+          ya mtandaoni inaonekana tupu — hii mara nyingi ni tatizo la muda la mtandao, SI kwamba
+          data imepotea. Kwa usalama, mfumo <b>haujaruhusu</b> kuunda akaunti mpya "ya kwanza" (jambo
+          ambalo lingeweza kufuta taarifa za kila mtu).
+        </p>
+        <div class="field"><label>Hatua zinazopendekezwa:</label>
+          <ul style="margin:0 0 10px 18px;padding:0;font-size:13px;color:var(--slate);">
+            <li>Hakikisha mtandao wa intaneti unafanya kazi vizuri</li>
+            <li>Bofya "Jaribu Tena" hapa chini</li>
+            <li>Ikiendelea, subiri dakika chache kisha jaribu tena</li>
+          </ul>
+        </div>
+        <div class="auth-error" id="authError"></div>
+        <button class="btn amber" style="width:100%;justify-content:center;margin-top:6px;" onclick="location.reload()">🔄 Jaribu Tena</button>
+      </div>
+      <div class="auth-foot">Data yako HAIJAFUTWA — hii ni onyo la tahadhari tu.</div>
+    </div>
+  `;
+  document.getElementById('authScreen').style.display='flex';
+  document.getElementById('app').style.display='none';
 }
 function startApp(){
   document.getElementById('authScreen').style.display='none';
@@ -5108,15 +5154,30 @@ async function bootFromCloud(){
     // kuruhusu ufikiaji WA APP HII TU (kupitia mtandao wa Firebase Auth), na kuzuia
     // mtu yeyote wa nje asiye na app hii kufikia database moja kwa moja.
     await firebase.auth().signInAnonymously();
-    const snap = await dbDocRef.get();
+    // MUHIMU: tunalazimisha kusoma moja kwa moja kutoka SERVER (sio "cache" ya kivinjari) ili
+    // tusipate taarifa za zamani/pungufu baada ya kifaa kukaa muda mrefu bila kutumika (idle).
+    const snap = await dbDocRef.get({source:'server'});
     if(snap.exists && snap.data() && snap.data().json){
       DB = migrateDB(mergeIntoDefaultDB(JSON.parse(snap.data().json)));
       try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
+      // Alama ya usalama: tumewahi kuona watumiaji halisi mtandaoni. Hii inatumika kuzuia
+      // mfumo usije "ukaanzisha upya" (na kufuta kila kitu) endapo siku moja database
+      // itaonekana tupu kimakosa (mfano tatizo la muda la mtandao).
+      if(DB.users && DB.users.length>0){ try{ localStorage.setItem('temesa_ever_synced_users','1'); }catch(e){} }
     } else {
-      // Hati bado haipo mtandaoni — hii ndiyo mara ya kwanza mfumo unawekwa online.
-      // Tunatuma tuliyo nayo (ya ndani, au default tupu) ili iwe mwanzo wa data ya pamoja.
-      DB.meta = DB.meta || {}; DB.meta.updatedAt = nowTime();
-      await dbDocRef.set({ json: JSON.stringify(DB), updatedAt: DB.meta.updatedAt });
+      const everSynced = (()=>{ try{ return localStorage.getItem('temesa_ever_synced_users')==='1'; }catch(e){ return false; } })();
+      if(everSynced){
+        // HATARI: kifaa hiki kimewahi kuona data halisi ya watumiaji mtandaoni awali, lakini sasa
+        // database inaonekana haipo/tupu — hii ni ISHARA YA TATIZO (sio mfumo mpya kabisa).
+        // HATUTATUMA/KUANDIKA CHOCHOTE mtandaoni kwa kujiendesha - hilo lingeweza KUFUTA data halisi
+        // ya kila mtu milele. Tunabaki na nakala ya ndani ya kifaa hiki na kuonyesha onyo.
+        cloudSuspiciousEmpty = true;
+        console.error('Database ya mtandaoni inaonekana tupu ingawa kifaa hiki kimewahi kuiona ikiwa na watumiaji. Hatutaandika chochote moja kwa moja - kuzuia kufuta data.');
+      } else {
+        // Hii kweli ni mara ya kwanza kabisa mfumo unawekwa online kutoka kifaa/mahali popote.
+        DB.meta = DB.meta || {}; DB.meta.updatedAt = nowTime();
+        await dbDocRef.set({ json: JSON.stringify(DB), updatedAt: DB.meta.updatedAt });
+      }
     }
     cloudReady = true;
     updateCloudBadge(true);
@@ -5142,6 +5203,13 @@ function attachCloudListener(){
     let incoming;
     try{ incoming = migrateDB(mergeIntoDefaultDB(JSON.parse(data.json))); }catch(e){ return; }
     if(DB.meta && incoming.meta && DB.meta.updatedAt === incoming.meta.updatedAt) return; // hakuna kilichobadilika
+    // Ulinzi wa usalama: kama mabadiliko yanayokuja mtandaoni yangefuta WATUMIAJI WOTE ghafla wakati
+    // hapa kwenye kifaa hiki tuna watumiaji halali, KATAA kuyatumia moja kwa moja - hii mara nyingi
+    // ni ishara ya tatizo la muunganiko/mzunguko mbaya, sio uamuzi wa kweli wa mtumiaji.
+    if((incoming.users||[]).length===0 && (DB.users||[]).length>0){
+      console.error('Ulinzi: kupuuza sasisho la mtandaoni lililokuwa na watumiaji=0 wakati kifaa hiki kina watumiaji halali.');
+      return;
+    }
     applyingRemoteUpdate = true;
     DB = incoming;
     try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
