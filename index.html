@@ -2791,6 +2791,16 @@ function renderExpenditures(el){
   const total = records.reduce((s,e)=>s+Number(e.amount||0),0);
   const byCategory = {};
   records.forEach(e=>{ byCategory[e.category] = (byCategory[e.category]||0) + Number(e.amount||0); });
+  // Posho (Allowances) ni MATUMIZI pia - tunayaonyesha hapa yakiwa yameunganishwa na matumizi mengine
+  // ili "Jumla ya Matumizi Yote" ionekane sahihi na ndiyo inayotumika kukokotoa Faida/Hasara.
+  const allowanceRecords = DB.allowances.filter(a=>inRange(a.date, expenditureFilterRange)).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const allowanceTotal = allowanceRecords.reduce((s,a)=>s+Number(a.amount||0),0);
+  const grandTotal = total + allowanceTotal;
+  // Muunganiko wa rekodi zote mbili (Matumizi + Posho) kwenye orodha MOJA, kwa mpangilio wa tarehe
+  const combined = [
+    ...records.map(e=>({date:e.date, type:EXPENDITURE_CATEGORIES[e.category]||e.category, source:'Matumizi', desc:e.description, amount:e.amount, id:e.id, kind:'expenditure'})),
+    ...allowanceRecords.map(a=>({date:a.date, type:ALLOWANCE_TYPES[a.type]||a.type, source:'Posho', desc:staffName(a.staffId)+(a.note?' — '+a.note:''), amount:a.amount, id:a.id, kind:'allowance'}))
+  ].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   el.innerHTML = `
   <div class="flex-between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
     <div class="pill-tabs" style="margin-bottom:0;">
@@ -2798,20 +2808,27 @@ function renderExpenditures(el){
     </div>
     <button class="btn amber" onclick="openExpenditureForm()">➕ Ongeza Matumizi</button>
   </div>
+  <div class="card stat red" style="margin-bottom:16px;">
+    <div class="stat-bar"></div>
+    <div class="stat-label">Jumla ya Matumizi Yote (Ikiwemo Posho) — Ndiyo Inayotumika kwenye Faida/Hasara</div>
+    <div class="stat-value">${fmtMoney(grandTotal)}</div>
+  </div>
   <div class="grid grid-4" style="margin-bottom:16px;">
     ${Object.keys(EXPENDITURE_CATEGORIES).map((k,i)=>`<div class="card stat ${['blue','amber','red','green','blue'][i%5]}"><div class="stat-bar"></div>
       <div class="stat-label">${EXPENDITURE_CATEGORIES[k]}</div><div class="stat-value" style="font-size:19px;">${fmtMoney(byCategory[k]||0)}</div></div>`).join('')}
+    <div class="card stat amber"><div class="stat-bar"></div><div class="stat-label">Posho za Wafanyakazi (Allowances)</div><div class="stat-value" style="font-size:19px;">${fmtMoney(allowanceTotal)}</div></div>
   </div>
   <div class="card">
-    <div class="card-head"><h3>Matumizi Yote</h3><span class="hint">Jumla: <b>${fmtMoney(total)}</b></span></div>
-    <div class="table-wrap"><table><thead><tr><th>Tarehe</th><th>Aina</th><th>Maelezo</th><th>Kiasi</th><th></th></tr></thead>
-    <tbody>${records.map(e=>`<tr>
-      <td>${esc(e.date)}</td>
-      <td>${EXPENDITURE_CATEGORIES[e.category]||e.category}</td>
-      <td>${esc(e.description||'—')}</td>
-      <td>${fmtMoney(e.amount)}</td>
-      <td style="text-align:right;">${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteExpenditure('${e.id}')">Futa</button>`:''}</td>
-    </tr>`).join('') || `<tr><td colspan="5" class="empty">Hakuna matumizi yaliyorekodiwa kwa kipindi hiki</td></tr>`}</tbody></table></div>
+    <div class="card-head"><h3>Matumizi Yote (Matumizi ya Moja kwa Moja + Posho)</h3><span class="hint">Jumla: <b>${fmtMoney(grandTotal)}</b></span></div>
+    <div class="table-wrap"><table><thead><tr><th>Tarehe</th><th>Chanzo</th><th>Aina</th><th>Maelezo</th><th>Kiasi</th><th></th></tr></thead>
+    <tbody>${combined.map(r=>`<tr>
+      <td>${esc(r.date)}</td>
+      <td><span class="badge ${r.source==='Posho'?'amber':'blue'} dot">${r.source}</span></td>
+      <td>${esc(r.type)}</td>
+      <td>${esc(r.desc||'—')}</td>
+      <td>${fmtMoney(r.amount)}</td>
+      <td style="text-align:right;">${canDeleteNow()?(r.kind==='expenditure'?`<button class="btn ghost sm" onclick="deleteExpenditure('${r.id}')">Futa</button>`:`<button class="btn ghost sm" onclick="deleteAllowance('${r.id}')">Futa</button>`):''}</td>
+    </tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna matumizi yaliyorekodiwa kwa kipindi hiki</td></tr>`}</tbody></table></div>
   </div>`;
 }
 function openExpenditureForm(){
@@ -3931,6 +3948,7 @@ const REPORT_TYPES = {
   maint_madogo: "Ripoti ya Matengenezo Madogo",
   maint_makubwa: "Ripoti ya Matengenezo Makubwa",
   maint_yote: "Ripoti ya Matengenezo Yote",
+  maint_status: "Ripoti ya Hali ya Matengenezo (Kamili/Yanaendelea/Vipuri/Hayajaanza/Hayajalipiwa)",
   clients: "Ripoti ya Wateja Bora na Wasiofanya Vizuri",
   performance: "Ripoti ya Utendaji wa Wafanyakazi",
   parts: "Ripoti ya Vipuri na Wazabuni",
@@ -4105,6 +4123,25 @@ function buildReportBody(type, range){
       ${vs.map(v=>{ const mc=maintSizeClass(v.totalCost); const m=mc?MAINT_SIZE_LABELS[mc]:null; return `<tr><td>${esc(v.regNo)}</td><td>${esc(v.owner)}</td><td>${m?m.label:'—'}</td><td>${fmtMoney(v.totalCost)}</td><td>${STATUS_LABELS[v.status].label}</td><td>${esc(staffNames(v.technicianIds))}</td></tr>`; }).join('') || `<tr><td colspan="6">Hakuna data</td></tr>`}
       </tbody></table>
       <div class="small" style="margin-top:12px;">Jumla ya magari: <b>${vs.length}</b> · Jumla ya gharama: <b>${fmtMoney(totalCost)}</b></div>`;
+  }
+  else if(type==='maint_status'){
+    const vs = DB.vehicles.filter(v=>v.unit==='matengenezo' && inRange(vehicleEffectiveDate(v), range));
+    const kamili = vs.filter(v=>v.status==='imekamilika');
+    const inaendelea = vs.filter(v=>v.status==='inaendelea');
+    const vipuri = vs.filter(v=>v.status==='inasubiri_vipuri');
+    const hazijaanza = vs.filter(v=>v.status==='haijaanza');
+    const hazijalipiwa = kamili.filter(v=>!v.paid);
+    const section = (title, list, color)=> `
+      <div style="font-weight:800;margin:16px 0 8px;color:var(${color});">${title} (${list.length})</div>
+      <table><thead><tr><th>Namba</th><th>Mmiliki</th><th>Tatizo</th><th>Gharama</th><th>Malipo</th><th>Fundi</th></tr></thead><tbody>
+      ${list.map(v=>`<tr><td>${esc(v.regNo)}</td><td>${esc(v.owner)}</td><td>${esc((v.neededMaintenance||'').slice(0,40))}</td><td>${fmtMoney(v.totalCost)}</td><td>${v.paid?'Imelipiwa':'<span style="color:var(--red);font-weight:700;">Bado</span>'}</td><td>${esc(staffNames(v.technicianIds))}</td></tr>`).join('') || `<tr><td colspan="6">Hakuna</td></tr>`}
+      </tbody></table>`;
+    body += `<div class="small" style="margin-bottom:10px;">Jumla ya kazi za Matengenezo kwenye kipindi hiki: <b>${vs.length}</b></div>`;
+    body += section('✅ Yaliyokamilika', kamili, '--green');
+    body += section('🔧 Yanayoendelea', inaendelea, '--navy-2');
+    body += section('⏳ Yanayosubiri Vipuri/Vifaa', vipuri, '--amber');
+    body += section('⬜ Hayajaanza', hazijaanza, '--slate');
+    body += section('💰 Yaliyokamilika Ila Hayajalipiwa', hazijalipiwa, '--red');
   }
   else if(type==='clients'){
     const r = rankClients();
