@@ -3949,6 +3949,10 @@ const REPORT_TYPES = {
   maint_makubwa: "Ripoti ya Matengenezo Makubwa",
   maint_yote: "Ripoti ya Matengenezo Yote",
   maint_status: "Ripoti ya Hali ya Matengenezo (Kamili/Yanaendelea/Vipuri/Hayajaanza/Hayajalipiwa)",
+  maint_incomplete: "Magari Ambayo Matengenezo Hayajakamilika (Yote)",
+  maint_unpaid: "Matengenezo Yaliyokamilika Ila Hayajalipiwa (+Jumla ya Deni)",
+  maint_not_started: "Magari Ambayo Matengenezo Hayajaanza",
+  maint_waiting_parts: "Magari Yanayosubiri Vipuri/Vifaa",
   clients: "Ripoti ya Wateja Bora na Wasiofanya Vizuri",
   performance: "Ripoti ya Utendaji wa Wafanyakazi",
   parts: "Ripoti ya Vipuri na Wazabuni",
@@ -4142,6 +4146,42 @@ function buildReportBody(type, range){
     body += section('⏳ Yanayosubiri Vipuri/Vifaa', vipuri, '--amber');
     body += section('⬜ Hayajaanza', hazijaanza, '--slate');
     body += section('💰 Yaliyokamilika Ila Hayajalipiwa', hazijalipiwa, '--red');
+  }
+  else if(type==='maint_incomplete'){
+    // Magari yote ya Matengenezo ambayo BADO hayajakamilika (Hayajaanza + Yanaendelea + Yanasubiri Vipuri)
+    const vs = DB.vehicles.filter(v=>v.unit==='matengenezo' && v.status!=='imekamilika' && inRange(vehicleEffectiveDate(v), range))
+      .sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
+    body += `<table><thead><tr><th>Namba</th><th>Mmiliki</th><th>Tatizo</th><th>Hali</th><th>Fundi</th><th>Tarehe</th></tr></thead><tbody>
+      ${vs.map(v=>`<tr><td>${esc(v.regNo)}</td><td>${esc(v.owner)}</td><td>${esc((v.neededMaintenance||'').slice(0,50))}</td><td><span class="badge ${STATUS_LABELS[v.status].cls} dot">${STATUS_LABELS[v.status].label}</span></td><td>${esc(staffNames(v.technicianIds))}</td><td>${fmtDate(vehicleEffectiveDate(v))}</td></tr>`).join('') || `<tr><td colspan="6">Hakuna magari yenye matengenezo yasiyokamilika</td></tr>`}
+      </tbody></table>
+      <div style="margin-top:14px;font-weight:800;font-size:15px;">JUMLA YA MAGARI AMBAYO MATENGENEZO HAYAJAKAMILIKA: ${vs.length}</div>`;
+  }
+  else if(type==='maint_unpaid'){
+    // Magari ambayo matengenezo yamekamilika lakini malipo bado
+    const vs = DB.vehicles.filter(v=>v.unit==='matengenezo' && v.status==='imekamilika' && !v.paid && inRange(vehicleEffectiveDate(v), range))
+      .sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
+    const totalOwed = vs.reduce((s,v)=>s+Math.max(0, Number(v.totalCost||0) - vehiclePaidTotal(v.id)), 0);
+    body += `<table><thead><tr><th>Namba</th><th>Mmiliki</th><th>Gharama Jumla</th><th>Kilicholipwa</th><th>Deni Lililobaki</th><th>Tarehe Kukamilika</th></tr></thead><tbody>
+      ${vs.map(v=>{ const paid=vehiclePaidTotal(v.id); const owed=Math.max(0,Number(v.totalCost||0)-paid); return `<tr><td>${esc(v.regNo)}</td><td>${esc(v.owner)}</td><td>${fmtMoney(v.totalCost)}</td><td>${fmtMoney(paid)}</td><td style="color:var(--red);font-weight:700;">${fmtMoney(owed)}</td><td>${fmtDate(vehicleEffectiveDate(v))}</td></tr>`; }).join('') || `<tr><td colspan="6">Hakuna magari yenye deni</td></tr>`}
+      </tbody></table>
+      <div style="margin-top:14px;font-weight:800;font-size:17px;color:var(--red);">JUMLA YA DENI LILILOBAKI: ${fmtMoney(totalOwed)}</div>
+      <div class="small" style="margin-top:4px;">Idadi ya magari yenye deni: <b>${vs.length}</b></div>`;
+  }
+  else if(type==='maint_not_started'){
+    const vs = DB.vehicles.filter(v=>v.unit==='matengenezo' && v.status==='haijaanza' && inRange(vehicleEffectiveDate(v), range))
+      .sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
+    body += `<table><thead><tr><th>Namba</th><th>Mmiliki</th><th>Tatizo</th><th>Fundi Aliyeteuliwa</th><th>Tarehe ya Kusajiliwa</th></tr></thead><tbody>
+      ${vs.map(v=>`<tr><td>${esc(v.regNo)}</td><td>${esc(v.owner)}</td><td>${esc((v.neededMaintenance||'').slice(0,50))}</td><td>${esc(staffNames(v.technicianIds))||'—'}</td><td>${fmtDate(vehicleEffectiveDate(v))}</td></tr>`).join('') || `<tr><td colspan="5">Hakuna magari ambayo hayajaanza matengenezo</td></tr>`}
+      </tbody></table>
+      <div style="margin-top:14px;font-weight:800;font-size:15px;">JUMLA YA MAGARI AMBAYO MATENGENEZO HAYAJAANZA: ${vs.length}</div>`;
+  }
+  else if(type==='maint_waiting_parts'){
+    const vs = DB.vehicles.filter(v=>v.unit==='matengenezo' && v.status==='inasubiri_vipuri' && inRange(vehicleEffectiveDate(v), range))
+      .sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
+    body += `<table><thead><tr><th>Namba</th><th>Mmiliki</th><th>Tatizo</th><th>Vipuri Vinavyosubiriwa</th><th>Fundi</th></tr></thead><tbody>
+      ${vs.map(v=>{ const waiting = DB.spareParts.filter(p=>p.jobRefType==='vehicle' && p.jobRefId===v.id && (invStatus(p)==='pending'||invStatus(p)==='overdue')).map(p=>p.partName).join(', '); return `<tr><td>${esc(v.regNo)}</td><td>${esc(v.owner)}</td><td>${esc((v.neededMaintenance||'').slice(0,40))}</td><td>${esc(waiting||'—')}</td><td>${esc(staffNames(v.technicianIds))}</td></tr>`; }).join('') || `<tr><td colspan="5">Hakuna magari yanayosubiri vipuri</td></tr>`}
+      </tbody></table>
+      <div style="margin-top:14px;font-weight:800;font-size:15px;">JUMLA YA MAGARI YANAYOSUBIRI VIPURI: ${vs.length}</div>`;
   }
   else if(type==='clients'){
     const r = rankClients();
