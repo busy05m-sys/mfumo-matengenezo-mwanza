@@ -254,10 +254,18 @@ const firebaseConfig = {
 let cloudDB = null;
 let dbDocRef = null;
 let firebaseAvailable = false;
+let temesaAuth = null; // Firebase Authentication ya kweli - inatatua tatizo la "kusahau nenosiri"
+                        // lililokuwa likitokea kwa sababu manenosiri ya zamani yalihifadhiwa ndani
+                        // ya "blob" moja kubwa ya JSON inayoshirikiwa na vifaa vyote (angalia maelezo
+                        // ya DB_KEY chini) - vifaa viwili vikihifadhi kwa wakati mmoja, kimoja
+                        // kingeweza "kufuta" bila kukusudia badiliko la nenosiri la kingine. Firebase
+                        // Authentication inasimamia manenosiri KATIKA MFUMO WAKE TOFAUTI KABISA,
+                        // hivyo haiwezi kuathiriwa na mzunguko huo tena.
 try{
   firebase.initializeApp(firebaseConfig);
   cloudDB = firebase.firestore();
   dbDocRef = cloudDB.collection('temesa_mwanza').doc('main_db');
+  temesaAuth = firebase.auth();
   firebaseAvailable = true;
 }catch(e){
   console.error('Firebase haikuweza kuanzishwa (huenda hakuna mtandao) — mfumo utatumia nakala ya ndani pekee.', e);
@@ -5228,7 +5236,7 @@ function saveParkingFee(){
   renderParkingFees(document.getElementById('view_parkingfees'));
 }
 
-/* ============================== AUTHENTICATION (Login / Setup / Logout) ============================== */
+/* ============================== AUTHENTICATION (Login / Setup / Logout) - Firebase Auth ya kweli ============================== */
 function renderSetupScreen(){
   document.getElementById('authScreen').innerHTML = `
     <div class="auth-card">
@@ -5242,7 +5250,7 @@ function renderSetupScreen(){
         <p class="small" style="margin-bottom:16px;">Akaunti hii itakuwa Msimamizi (Admin) mwenye ruhusa zote, na ndiye atakayeongeza akaunti za watumishi wengine baadaye.</p>
         <div class="auth-error" id="authError"></div>
         <div class="field"><label>Jina Kamili</label><input id="su_fullName" placeholder="mf. Said Mawazo"></div>
-        <div class="field"><label>Jina la Kuingilia (Username)</label><input id="su_username" placeholder="mf. said.mawazo" autocomplete="username"></div>
+        <div class="field"><label>Barua Pepe</label><input id="su_email" type="email" placeholder="mf. said@gmail.com" autocomplete="email"></div>
         <div class="field"><label>Nenosiri</label>
           <div style="display:flex;gap:8px;"><input id="su_password" type="password" autocomplete="new-password" style="flex:1;"><button type="button" class="copybtn" onclick="togglePasswordVisibility('su_password', this)">Onyesha</button></div>
         </div>
@@ -5268,7 +5276,7 @@ function renderLoginScreen(){
       <div class="auth-body">
         <h3 style="font-size:15px;margin-bottom:16px;">Ingia Kwenye Mfumo</h3>
         <div class="auth-error" id="authError"></div>
-        <div class="field"><label>Jina la Kuingilia (Username)</label><input id="li_username" placeholder="mf. said.mawazo" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('li_password').focus()"></div>
+        <div class="field"><label>Barua Pepe</label><input id="li_email" type="email" placeholder="mf. said@gmail.com" autocomplete="email" onkeydown="if(event.key==='Enter')document.getElementById('li_password').focus()"></div>
         <div class="field"><label>Nenosiri</label>
           <div style="display:flex;gap:8px;">
             <input id="li_password" type="password" autocomplete="current-password" style="flex:1;" onkeydown="if(event.key==='Enter')attemptLogin()">
@@ -5276,6 +5284,7 @@ function renderLoginScreen(){
           </div>
         </div>
         <button class="btn amber" style="width:100%;justify-content:center;margin-top:6px;" onclick="attemptLogin()">Ingia</button>
+        <a href="javascript:void(0)" onclick="sendTemesaPasswordReset()" style="display:block;text-align:center;margin-top:10px;font-size:12.5px;color:var(--navy-2);font-weight:700;">Umesahau nenosiri?</a>
       </div>
       <div class="auth-foot">
         Una tatizo la kuingia? <a href="javascript:void(0)" onclick="renderRecoveryScreen()" style="color:var(--navy-2);font-weight:700;">Bofya hapa</a>
@@ -5357,7 +5366,8 @@ function resetAllAccounts(){
   if(!confirm("Una uhakika? Hii itafuta AKAUNTI ZOTE kwenye kompyuta hii (si magari/mifumo/malipo). Huwezi kurudisha nyuma.")) return;
   DB.users = [];
   saveDB();
-  localStorage.removeItem('temesa_current_user_id');
+  emergencyMode = false;
+  if(temesaAuth) temesaAuth.signOut();
   renderSetupScreen();
 }
 function showAuthError(msg){
@@ -5366,55 +5376,92 @@ function showAuthError(msg){
 }
 async function createFirstAdmin(){
   const fullName = document.getElementById('su_fullName').value.trim();
-  const username = document.getElementById('su_username').value.trim();
+  const email = document.getElementById('su_email').value.trim();
   const pw = document.getElementById('su_password').value;
   const pw2 = document.getElementById('su_password2').value;
-  if(!fullName || !username || !pw){ showAuthError("Jaza taarifa zote"); return; }
-  if(pw.length<4){ showAuthError("Nenosiri liwe angalau herufi/namba 4"); return; }
+  if(!fullName || !email || !pw){ showAuthError("Jaza taarifa zote"); return; }
+  if(pw.length<6){ showAuthError("Nenosiri liwe angalau herufi 6"); return; }
   if(pw!==pw2){ showAuthError("Manenosiri hayafanani"); return; }
-  const passwordHash = await hashPassword(pw);
-  const user = {id:uid('usr'), username, passwordHash, fullName, role:'Msimamizi (Full Access)',
-    allowedModules: ALL_MODULES.map(m=>m.id), isAdmin:true, active:true, createdAt:nowTime()};
-  DB.users.push(user); saveDB();
-  currentUser = user;
-  localStorage.setItem('temesa_current_user_id', user.id);
-  startApp();
+  try{
+    const cred = await temesaAuth.createUserWithEmailAndPassword(email, pw);
+    const user = {id:uid('usr'), uid:cred.user.uid, username:email, fullName, role:'Msimamizi (Full Access)',
+      allowedModules: ALL_MODULES.map(m=>m.id), isAdmin:true, canEdit:true, canDelete:true, active:true, createdAt:nowTime()};
+    DB.users.push(user); saveDB();
+    // onAuthStateChanged (angalia initAuth) itashughulikia currentUser + startApp() moja kwa moja
+  }catch(e){ showAuthError(temesaAuthErr(e.code)); }
+}
+function temesaAuthErr(code){
+  const map = {
+    'auth/email-already-in-use':'Barua pepe hii tayari ina akaunti. Jaribu "Ingia" badala yake.',
+    'auth/invalid-email':'Barua pepe si sahihi.',
+    'auth/weak-password':'Nenosiri ni fupi mno (angalau herufi 6).',
+    'auth/user-not-found':'Akaunti haipo kwa barua pepe hii.',
+    'auth/wrong-password':'Nenosiri sio sahihi.',
+    'auth/invalid-credential':'Barua pepe au nenosiri si sahihi.',
+    'auth/missing-password':'Andika nenosiri.',
+    'auth/too-many-requests':'Majaribio mengi yameshindwa. Subiri kidogo kisha jaribu tena.',
+    'auth/network-request-failed':'Hitilafu ya mtandao. Angalia intaneti yako.'
+  };
+  return map[code] || ('Hitilafu: '+code);
 }
 async function attemptLogin(){
-  const username = document.getElementById('li_username').value.trim();
+  const email = document.getElementById('li_email').value.trim();
   const pw = document.getElementById('li_password').value;
-  const user = DB.users.find(u=>u.username.toLowerCase()===username.toLowerCase());
-  if(!user || user.active===false){ showAuthError("Jina la mtumiaji halipo au akaunti imezimwa"); return; }
-  const ok = await passwordMatches(pw, user.passwordHash);
-  if(!ok){ showAuthError("Nenosiri sio sahihi. Ukiendelea kupata tatizo hili hata ukiwa na uhakika nenosiri ni sahihi, bofya 'Una tatizo la kuingia?' chini."); return; }
-  currentUser = user;
-  localStorage.setItem('temesa_current_user_id', user.id);
-  startApp();
+  if(!email || !pw){ showAuthError("Jaza barua pepe na nenosiri"); return; }
+  try{
+    await temesaAuth.signInWithEmailAndPassword(email, pw);
+    // onAuthStateChanged itashughulikia currentUser + startApp()
+  }catch(e){ showAuthError(temesaAuthErr(e.code)); }
+}
+async function sendTemesaPasswordReset(){
+  const email = document.getElementById('li_email').value.trim();
+  if(!email){ showAuthError('Andika barua pepe yako juu kwanza, kisha bofya hapa tena.'); return; }
+  try{
+    await temesaAuth.sendPasswordResetEmail(email);
+    showAuthError('✅ Barua pepe ya kubadili nenosiri imetumwa. Angalia inbox yako (na Spam).');
+  }catch(e){ showAuthError(temesaAuthErr(e.code)); }
 }
 function logout(){
   if(!confirm("Una uhakika unataka kutoka?")) return;
   currentUser = null;
   emergencyMode = false;
-  localStorage.removeItem('temesa_current_user_id');
   document.getElementById('app').style.display='none';
-  renderLoginScreen();
+  if(temesaAuth) temesaAuth.signOut(); else renderLoginScreen();
 }
 function initAuth(){
-  if(DB.users.length===0){
-    if(cloudSuspiciousEmpty){
-      // Usalama: badala ya kumruhusu mtu "kuunda akaunti ya kwanza" (jambo ambalo lingefuta kabisa
-      // data halisi ya kila mtu mara moja aliporidhia), tunaonyesha onyo na chaguo la kujaribu tena
-      // kuunganisha na database ya mtandaoni kabla ya kuruhusu chochote kingine.
-      renderCloudRecoveryScreen();
-    } else {
-      renderSetupScreen();
-    }
+  if(!firebaseAvailable || !temesaAuth){
+    // Hakuna Firebase (mtandao mbovu) - hakuna njia salama ya kuthibitisha bila mtandao,
+    // mtumiaji anaweza kutumia 'Ingia kwa Dharura' kwenye skrini ya 'Una tatizo la kuingia?'.
+    renderLoginScreen();
     return;
   }
-  const savedId = localStorage.getItem('temesa_current_user_id');
-  const savedUser = savedId ? DB.users.find(u=>u.id===savedId && u.active!==false) : null;
-  if(savedUser){ currentUser = savedUser; startApp(); }
-  else { renderLoginScreen(); }
+  temesaAuth.onAuthStateChanged(async function(fbUser){
+    if(emergencyMode) return; // usiathiri kikao cha dharura kilichopo
+    if(fbUser){
+      let profile = DB.users.find(u=>u.uid===fbUser.uid);
+      if(!profile){
+        // Huenda ni akaunti mpya iliyoundwa sasa hivi na 'createFirstAdmin' na saveDB() bado
+        // haijafika kwenye kumbukumbu ya ndani - subiri kidogo kisha jaribu tena mara moja.
+        await new Promise(r=>setTimeout(r,800));
+        profile = DB.users.find(u=>u.uid===fbUser.uid);
+      }
+      if(!profile || profile.active===false){
+        renderLoginScreen();
+        showAuthError(profile ? 'Akaunti hii imezimwa. Wasiliana na Msimamizi.' : 'Akaunti hii haijasajiliwa kwenye mfumo huu. Wasiliana na Msimamizi.');
+        temesaAuth.signOut();
+        return;
+      }
+      currentUser = profile;
+      startApp();
+    } else {
+      if(DB.users.length===0){
+        if(cloudSuspiciousEmpty){ renderCloudRecoveryScreen(); }
+        else { renderSetupScreen(); }
+      } else {
+        renderLoginScreen();
+      }
+    }
+  });
 }
 /** Skrini ya onyo/usalama - inaonekana TU endapo database mtandaoni imeonekana tupu kimashaka
  *  (ingawa kifaa hiki kimewahi kuiona ikiwa na watumiaji halisi awali). Inazuia kuundwa kwa
@@ -5478,7 +5525,7 @@ function renderUsers(el){
     <button class="btn amber" onclick="openUserForm()">➕ Ongeza Mtumiaji</button>
   </div>
   <div class="card">
-    <div class="table-wrap"><table><thead><tr><th>Jina</th><th>Username</th><th>Wadhifa</th><th>Ruhusa</th><th>Hali</th><th></th></tr></thead>
+    <div class="table-wrap"><table><thead><tr><th>Jina</th><th>Barua Pepe</th><th>Wadhifa</th><th>Ruhusa</th><th>Hali</th><th></th></tr></thead>
     <tbody>${list.map(u=>`<tr>
       <td style="font-weight:700;">${esc(u.fullName)} ${u.id===currentUser.id?'<span class="badge blue dot">Wewe</span>':''}</td>
       <td class="mono">${esc(u.username)}</td>
@@ -5505,22 +5552,40 @@ function openUserForm(id){
       <div class="auth-error" id="userFormError"></div>
       <div class="form-row">
         <div class="field"><label>Jina Kamili *</label><input id="uf_fullName" value="${u?esc(u.fullName):''}"></div>
-        <div class="field"><label>Username *</label><input id="uf_username" value="${u?esc(u.username):''}" ${u?'':''}></div>
+        <div class="field"><label>Barua Pepe *</label><input id="uf_email" type="email" value="${u?esc(u.username):''}" ${u?'readonly':''} placeholder="mf. jina@gmail.com"></div>
       </div>
+      ${u ? `
+      <div class="field">
+        <button type="button" class="btn secondary sm" onclick="sendResetForUser('${esc(u.username)}')">✉️ Tuma Barua Pepe ya Kubadili Nenosiri</button>
+        <span class="opt">Hii ndiyo njia salama ya kubadili nenosiri la mtumiaji mwingine — hatuwezi tena kuliweka moja kwa moja hapa.</span>
+      </div>` : `
       <div class="form-row">
-        <div class="field"><label>${u?'Nenosiri Jipya (acha wazi kutobadilisha)':'Nenosiri *'}</label><input id="uf_password" type="password"></div>
+        <div class="field"><label>Nenosiri la Awali *</label><input id="uf_password" type="password" placeholder="Angalau herufi 6"></div>
         <div class="field"><label>Wadhifa / Kundi la Ruhusa</label>
           <select id="uf_rolePreset" onchange="onUserRolePresetChange(this.value)">
             <optgroup label="Makundi ya Ruhusa (huweka ruhusa kiotomatiki)">
-              ${presetKeys.map(k=>`<option value="${esc(k)}" ${u&&u.role===k?'selected':''}>${k}</option>`).join('')}
+              ${presetKeys.map(k=>`<option value="${esc(k)}">${k}</option>`).join('')}
             </optgroup>
             ${staffRoles.length? `<optgroup label="Wadhifa wa Wafanyakazi (jina tu — chagua ruhusa mwenyewe chini)">
-              ${staffRoles.map(r=>`<option value="${esc(r)}" ${u&&u.role===r?'selected':''}>${esc(r)}</option>`).join('')}
+              ${staffRoles.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('')}
             </optgroup>` : ''}
-            <option value="${CUSTOM_ROLE_OPTION}" ${u&&!currentRoleIsKnown?'selected':''}>➕ Nyingine (Andika Wadhifa Mwenyewe)</option>
+            <option value="${CUSTOM_ROLE_OPTION}">➕ Nyingine (Andika Wadhifa Mwenyewe)</option>
           </select>
         </div>
-      </div>
+      </div>`}
+      ${u ? `
+      <div class="field">
+        <label>Wadhifa / Kundi la Ruhusa</label>
+        <select id="uf_rolePreset" onchange="onUserRolePresetChange(this.value)">
+          <optgroup label="Makundi ya Ruhusa (huweka ruhusa kiotomatiki)">
+            ${presetKeys.map(k=>`<option value="${esc(k)}" ${u.role===k?'selected':''}>${k}</option>`).join('')}
+          </optgroup>
+          ${staffRoles.length? `<optgroup label="Wadhifa wa Wafanyakazi (jina tu — chagua ruhusa mwenyewe chini)">
+            ${staffRoles.map(r=>`<option value="${esc(r)}" ${u.role===r?'selected':''}>${esc(r)}</option>`).join('')}
+          </optgroup>` : ''}
+          <option value="${CUSTOM_ROLE_OPTION}" ${!currentRoleIsKnown?'selected':''}>➕ Nyingine (Andika Wadhifa Mwenyewe)</option>
+        </select>
+      </div>` : ''}
       <div class="field" id="uf_customRoleBox" style="display:${u&&!currentRoleIsKnown?'block':'none'};">
         <label>Andika Wadhifa Mpya *</label><input id="uf_customRole" value="${u&&!currentRoleIsKnown?esc(u.role):''}" placeholder="mf. Mhandisi wa Mitambo">
       </div>
@@ -5556,6 +5621,12 @@ function openUserForm(id){
     <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveUser('${id||''}')">Hifadhi</button></div>
   `);
 }
+async function sendResetForUser(email){
+  try{
+    await temesaAuth.sendPasswordResetEmail(email);
+    toast("Barua pepe ya kubadili nenosiri imetumwa kwa "+email, "green");
+  }catch(e){ toast(temesaAuthErr(e.code), "red"); }
+}
 /** Ukichagua "Kundi la Ruhusa" rasmi, ruhusa zinawekwa kiotomatiki (kama zamani). Ukichagua wadhifa wa
  *  mfanyakazi (usio na kundi la ruhusa) au "Nyingine", ruhusa HAZIGUSWI — Msimamizi anachagua mwenyewe. */
 function onUserRolePresetChange(val){
@@ -5578,14 +5649,12 @@ function toggleAdminModules(isAdmin){
 async function saveUser(id){
   if(id && !requireEdit()) return;
   const fullName = document.getElementById('uf_fullName').value.trim();
-  const username = document.getElementById('uf_username').value.trim();
-  const pw = document.getElementById('uf_password').value;
+  const email = document.getElementById('uf_email').value.trim();
   const err = document.getElementById('userFormError');
   err.classList.remove('show');
-  if(!fullName || !username){ err.textContent="Jaza jina na username"; err.classList.add('show'); return; }
-  const dup = DB.users.find(u=>u.username.toLowerCase()===username.toLowerCase() && u.id!==id);
-  if(dup){ err.textContent="Username hii tayari inatumika na mtumiaji mwingine"; err.classList.add('show'); return; }
-  if(!id && !pw){ err.textContent="Weka nenosiri kwa mtumiaji mpya"; err.classList.add('show'); return; }
+  if(!fullName || !email){ err.textContent="Jaza jina na barua pepe"; err.classList.add('show'); return; }
+  const dup = DB.users.find(u=>u.username.toLowerCase()===email.toLowerCase() && u.id!==id);
+  if(dup){ err.textContent="Barua pepe hii tayari inatumika na mtumiaji mwingine"; err.classList.add('show'); return; }
   const allowedModules = [...document.querySelectorAll('#uf_modules input:checked')].map(i=>i.value);
   const isAdmin = document.getElementById('uf_isAdmin').checked;
   const canEdit = isAdmin || document.getElementById('uf_canEdit').checked;
@@ -5596,20 +5665,39 @@ async function saveUser(id){
     if(!customRole){ toast("Andika jina la wadhifa mpya","red"); return; }
     role = customRole;
   }
-  const data = { fullName, username, role, allowedModules, isAdmin, canEdit, canDelete };
   if(id){
+    // Kuhariri mtumiaji aliyepo: taarifa za ruhusa tu (barua pepe/nenosiri havibadilishwi hapa)
     const u = DB.users.find(x=>x.id===id);
-    Object.assign(u, data);
-    if(pw) u.passwordHash = await hashPassword(pw);
+    Object.assign(u, { fullName, role, allowedModules, isAdmin, canEdit, canDelete });
     const activeBox = document.getElementById('uf_active');
     if(activeBox) u.active = activeBox.checked;
-  } else {
-    const passwordHash = await hashPassword(pw);
-    DB.users.push({id:uid('usr'), ...data, passwordHash, active:true, createdAt:nowTime()});
+    saveDB(); closeModal(); toast("Taarifa za mtumiaji zimehifadhiwa","green");
+    renderUsers(document.getElementById('view_users'));
+    if(id===currentUser?.id){ buildSidebar(); }
+    return;
   }
-  saveDB(); closeModal(); toast("Taarifa za mtumiaji zimehifadhiwa","green");
-  renderUsers(document.getElementById('view_users'));
-  if(id===currentUser?.id){ buildSidebar(); } // refresh own nav if self-edited
+  // Mtumiaji mpya: tengeneza akaunti ya Firebase Authentication BILA kuathiri kikao chako
+  // cha sasa (kwa kutumia "secondary app" - mfano tuliotumia KCL na Wapangaji).
+  const pw = document.getElementById('uf_password').value;
+  if(!pw || pw.length<6){ err.textContent="Weka nenosiri la awali (angalau herufi 6)"; err.classList.add('show'); return; }
+  const saveBtn = document.querySelector('.modal-foot .btn.amber');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Inatengeneza akaunti...'; }
+  const secName = 'secondary_temesa_'+Date.now();
+  try{
+    const secApp = firebase.initializeApp(firebaseConfig, secName);
+    const secAuth = secApp.auth();
+    const cred = await secAuth.createUserWithEmailAndPassword(email, pw);
+    const newUid = cred.user.uid;
+    await secAuth.signOut();
+    await secApp.delete();
+    DB.users.push({id:uid('usr'), uid:newUid, username:email, fullName, role, allowedModules, isAdmin, canEdit, canDelete, active:true, createdAt:nowTime()});
+    saveDB(); closeModal();
+    toast(`Mtumiaji ameongezwa. Mpe barua pepe: ${email} na nenosiri: ${pw}`,"green");
+    renderUsers(document.getElementById('view_users'));
+  }catch(e){
+    err.textContent = temesaAuthErr(e.code); err.classList.add('show');
+    if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Hifadhi'; }
+  }
 }
 function deleteUser(id){
   if(!requireDelete()) return;
