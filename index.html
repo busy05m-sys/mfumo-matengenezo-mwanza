@@ -5258,6 +5258,7 @@ function renderSetupScreen(){
           <div style="display:flex;gap:8px;"><input id="su_password2" type="password" autocomplete="new-password" style="flex:1;"><button type="button" class="copybtn" onclick="togglePasswordVisibility('su_password2', this)">Onyesha</button></div>
         </div>
         <button class="btn amber" style="width:100%;justify-content:center;margin-top:6px;" onclick="createFirstAdmin()">Tengeneza Akaunti &amp; Ingia</button>
+        <a href="javascript:void(0)" onclick="renderLoginScreen()" style="display:block;text-align:center;margin-top:10px;font-size:12.5px;color:var(--navy-2);font-weight:700;">Tayari una akaunti? Ingia</a>
       </div>
       <div class="auth-foot">Mfumo wa Ndani wa TEMESA Mwanza</div>
     </div>
@@ -5429,7 +5430,17 @@ async function attemptLogin(){
     const verifiedUid = cred.user.uid;
     await secApp.auth().signOut();
     await secApp.delete();
-    const profile = DB.users.find(u=>u.uid===verifiedUid);
+    let profile = DB.users.find(u=>u.uid===verifiedUid);
+    if(!profile && DB.users.length===0){
+      // Kurejesha kiotomatiki: barua pepe/nenosiri hii ni sahihi (Firebase inaithibitisha), lakini
+      // hakuna wasifu wa mtumiaji uliohifadhiwa (mf. hatua ya awali ilikatika katikati). Kwa kuwa
+      // hakuna wasifu MWINGINE wowote uliopo, ni salama kumfanya huyu kuwa Msimamizi wa kwanza
+      // moja kwa moja - kama alivyokusudia awali.
+      profile = {id:uid('usr'), uid:verifiedUid, username:email, fullName:email.split('@')[0],
+        role:'Msimamizi (Full Access)', allowedModules: ALL_MODULES.map(m=>m.id),
+        isAdmin:true, canEdit:true, canDelete:true, active:true, createdAt:nowTime()};
+      DB.users.push(profile); saveDB();
+    }
     if(!profile || profile.active===false){
       showAuthError(profile ? 'Akaunti hii imezimwa. Wasiliana na Msimamizi.' : 'Akaunti hii haijasajiliwa kwenye mfumo huu. Wasiliana na Msimamizi.');
       return;
