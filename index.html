@@ -305,6 +305,29 @@ async function saveUsersRegistry(){
     toast('⚠️ Imeshindwa kuhifadhi akaunti mtandaoni. Angalia intaneti yako.','red');
   }
 }
+/** NJIA SALAMA ZAIDI YA KUBADILISHA WATUMIAJI: "Firestore Transaction" - inasoma hali halisi ya
+ *  sasa MOJA KWA MOJA kutoka Firestore, inatumia 'mutatorFn' kuibadilisha, kisha inaandika tena -
+ *  yote haya YAKIWA KAZI MOJA ISIYOWEZA KUKATIZWA. Hii inazuia kabisa aina ya mzunguko mbaya
+ *  (race condition) uliokuwa ukisababisha watumiaji "kupotea" mtu akiongeza wengine haraka
+ *  mfululizo - kwa sababu HATUTEGEMEI tena nakala ya DB.users iliyopo kwenye kumbukumbu ya
+ *  kivinjari (ambayo inaweza kuwa imepitwa na wakati), bali tunasoma-na-kuandika moja kwa moja.
+ */
+async function mutateUsersRegistry(mutatorFn){
+  if(!firebaseAvailable || !usersDocRef || !cloudDB){
+    mutatorFn(DB.users);
+    saveDB();
+    return;
+  }
+  await cloudDB.runTransaction(async (tx)=>{
+    const snap = await tx.get(usersDocRef);
+    let users = (snap.exists && Array.isArray(snap.data().users)) ? snap.data().users.slice() : (DB.users||[]).slice();
+    mutatorFn(users);
+    tx.set(usersDocRef, { users, updatedAt: new Date().toISOString() });
+    DB.users = users;
+  });
+  rememberKnownSuperAdmin(DB.users);
+  try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
+}
 async function loadUsersRegistry(){
   if(!firebaseAvailable || !usersDocRef) return false;
   try{
@@ -622,9 +645,9 @@ function saveDB(){
   catch(e){ toast("Hifadhi ya kivinjari imeshindikana: " + e.message, "red"); }
   // Shadow copy in IndexedDB (survives some cases where localStorage alone is cleared)
   idbSet('data','db_snapshot', DB).catch(()=>{});
-  // Watumiaji (akaunti/majina/manenosiri) wanahifadhiwa KATIKA NYARAKA YAO TOFAUTI - angalia
-  // maelezo karibu na usersDocRef juu ya faili hili kwa sababu ya tatizo hili.
-  saveUsersRegistry();
+  // Kumbuka: mabadiliko ya WATUMIAJI (kuongeza/kuhariri/kufuta) sasa yanapita kwenye
+  // mutateUsersRegistry() (Firestore Transaction salama) - SI hapa tena - angalia
+  // createFirstAdmin/saveUser/deleteUser/resetAllAccounts.
   // Tuma nakala kwenye Firestore (database ya mtandaoni) ili vifaa vingine
   // vinavyofungua mfumo huu vione mabadiliko haya. Haizuii mtumiaji kuendelea
   // kufanya kazi hata kama mtandao ni hafifu — itajaribu tena kimya kimya.
@@ -5436,12 +5459,12 @@ function enterEmergencyMode(){
 }
 function resetAllAccounts(){
   if(!confirm("Una uhakika? Hii itafuta AKAUNTI ZOTE kwenye kompyuta hii (si magari/mifumo/malipo). Huwezi kurudisha nyuma.")) return;
-  DB.users = [];
   try{ localStorage.removeItem('temesa_known_superadmin_username'); }catch(e){}
-  saveDB();
-  emergencyMode = false;
-  localStorage.removeItem('temesa_current_user_id');
-  renderSetupScreen();
+  mutateUsersRegistry(users=>{ users.length=0; }).then(()=>{
+    emergencyMode = false;
+    localStorage.removeItem('temesa_current_user_id');
+    renderSetupScreen();
+  });
 }
 function showAuthError(msg){
   const el = document.getElementById('authError');
@@ -5468,8 +5491,8 @@ async function createFirstAdmin(){
     await secApp.auth().signOut();
     await secApp.delete();
     const user = {id:uid('usr'), uid:newUid, username:email, fullName, role:'Msimamizi (Full Access)',
-      allowedModules: ALL_MODULES.map(m=>m.id), isAdmin:true, canEdit:true, canDelete:true, active:true, createdAt:nowTime()};
-    DB.users.push(user); saveDB();
+      allowedModules: ALL_MODULES.map(m=>m.id), isAdmin:true, superAdmin:true, canEdit:true, canDelete:true, active:true, createdAt:nowTime()};
+    await mutateUsersRegistry(users=>{ users.push(user); });
     currentUser = user;
     localStorage.setItem('temesa_current_user_id', user.id);
     startApp();
@@ -5506,12 +5529,12 @@ async function attemptLogin(){
     if(!profile && DB.users.length===0){
       // Kurejesha kiotomatiki: barua pepe/nenosiri hii ni sahihi (Firebase inaithibitisha), lakini
       // hakuna wasifu wa mtumiaji uliohifadhiwa (mf. hatua ya awali ilikatika katikati). Kwa kuwa
-      // hakuna wasifu MWINGINE wowote uliopo, ni salama kumfanya huyu kuwa Msimamizi wa kwanza
-      // moja kwa moja - kama alivyokusudia awali.
+      // hakuna wasifu MWINGINE wowote uliopo, ni salama kumfanya huyu kuwa Msimamizi Mkuu wa
+      // kwanza moja kwa moja - kama alivyokusudia awali.
       profile = {id:uid('usr'), uid:verifiedUid, username:email, fullName:email.split('@')[0],
         role:'Msimamizi (Full Access)', allowedModules: ALL_MODULES.map(m=>m.id),
-        isAdmin:true, canEdit:true, canDelete:true, active:true, createdAt:nowTime()};
-      DB.users.push(profile); saveDB();
+        isAdmin:true, superAdmin:true, canEdit:true, canDelete:true, active:true, createdAt:nowTime()};
+      await mutateUsersRegistry(users=>{ users.push(profile); });
     }
     if(!profile || profile.active===false){
       showAuthError(profile ? 'Akaunti hii imezimwa. Wasiliana na Msimamizi.' : 'Akaunti hii haijasajiliwa kwenye mfumo huu. Wasiliana na Msimamizi.');
@@ -5622,14 +5645,14 @@ function renderUsers(el){
   <div class="card">
     <div class="table-wrap"><table><thead><tr><th>Jina</th><th>Barua Pepe</th><th>Wadhifa</th><th>Ruhusa</th><th>Hali</th><th></th></tr></thead>
     <tbody>${list.map(u=>`<tr>
-      <td style="font-weight:700;">${esc(u.fullName)} ${u.id===currentUser.id?'<span class="badge blue dot">Wewe</span>':''}</td>
+      <td style="font-weight:700;">${esc(u.fullName)} ${u.id===currentUser.id?'<span class="badge blue dot">Wewe</span>':''} ${u.superAdmin?'<span class="badge red dot">Mkuu</span>':''}</td>
       <td class="mono">${esc(u.username)}</td>
       <td>${esc(u.role||'—')}</td>
       <td>${u.isAdmin ? '<span class="badge amber dot">Ruhusa Zote</span>' : `<span class="small">${(u.allowedModules||[]).length} sehemu</span>`}</td>
       <td>${u.active===false ? '<span class="badge red dot">Imezimwa</span>' : '<span class="badge green dot">Hai</span>'}</td>
       <td style="text-align:right;">
         ${canEditNow()?`<button class="btn ghost sm" onclick="openUserForm('${u.id}')">Hariri</button>`:''}
-        ${u.id!==currentUser.id && canDeleteNow() ? `<button class="btn ghost sm" onclick="deleteUser('${u.id}')">Futa</button>` : ''}
+        ${u.id!==currentUser.id && !u.superAdmin && canDeleteNow() ? `<button class="btn ghost sm" onclick="deleteUser('${u.id}')">Futa</button>` : ''}
       </td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna mtumiaji bado</td></tr>`}</tbody></table></div>
   </div>
   `;
@@ -5762,13 +5785,15 @@ async function saveUser(id){
   }
   if(id){
     // Kuhariri mtumiaji aliyepo: taarifa za ruhusa tu (barua pepe/nenosiri havibadilishwi hapa)
-    const u = DB.users.find(x=>x.id===id);
-    Object.assign(u, { fullName, role, allowedModules, isAdmin, canEdit, canDelete });
     const activeBox = document.getElementById('uf_active');
-    if(activeBox) u.active = activeBox.checked;
-    saveDB(); closeModal(); toast("Taarifa za mtumiaji zimehifadhiwa","green");
+    const isActive = activeBox ? activeBox.checked : true;
+    await mutateUsersRegistry(users=>{
+      const u = users.find(x=>x.id===id);
+      if(u){ Object.assign(u, { fullName, role, allowedModules, isAdmin, canEdit, canDelete, active:isActive }); }
+    });
+    closeModal(); toast("Taarifa za mtumiaji zimehifadhiwa","green");
     renderUsers(document.getElementById('view_users'));
-    if(id===currentUser?.id){ buildSidebar(); }
+    if(id===currentUser?.id){ currentUser = DB.users.find(u=>u.id===id) || currentUser; buildSidebar(); }
     return;
   }
   // Mtumiaji mpya: tengeneza akaunti ya Firebase Authentication BILA kuathiri kikao chako
@@ -5785,8 +5810,9 @@ async function saveUser(id){
     const newUid = cred.user.uid;
     await secAuth.signOut();
     await secApp.delete();
-    DB.users.push({id:uid('usr'), uid:newUid, username:email, fullName, role, allowedModules, isAdmin, canEdit, canDelete, active:true, createdAt:nowTime()});
-    saveDB(); closeModal();
+    const newUser = {id:uid('usr'), uid:newUid, username:email, fullName, role, allowedModules, isAdmin, canEdit, canDelete, active:true, createdAt:nowTime()};
+    await mutateUsersRegistry(users=>{ users.push(newUser); });
+    closeModal();
     toast(`Mtumiaji ameongezwa. Mpe barua pepe: ${email} na nenosiri: ${pw}`,"green");
     renderUsers(document.getElementById('view_users'));
   }catch(e){
@@ -5794,11 +5820,16 @@ async function saveUser(id){
     if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Hifadhi'; }
   }
 }
-function deleteUser(id){
+async function deleteUser(id){
   if(!requireDelete()) return;
+  const target = DB.users.find(u=>u.id===id);
+  if(target && target.superAdmin){ alert('Huwezi kufuta Msimamizi Mkuu.'); return; }
   if(!confirm("Una uhakika unataka kufuta mtumiaji huyu?")) return;
-  DB.users = DB.users.filter(u=>u.id!==id);
-  saveDB(); toast("Mtumiaji amefutwa","green");
+  await mutateUsersRegistry(users=>{
+    const idx = users.findIndex(u=>u.id===id);
+    if(idx>=0) users.splice(idx,1);
+  });
+  toast("Mtumiaji amefutwa","green");
   renderUsers(document.getElementById('view_users'));
 }
 
