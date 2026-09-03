@@ -253,6 +253,10 @@ const firebaseConfig = {
 // yake unaendelea kwa nakala ya ndani (localStorage) tu, kama zamani.
 let cloudDB = null;
 let dbDocRef = null;
+let usersDocRef = null; // Nyaraka TOFAUTI kabisa kwa ajili ya watumiaji - imetenganishwa na "blob" kubwa
+                         // ya data nyingine (magari, wafanyakazi, malipo n.k) ili akaunti mpya/nenosiri
+                         // zisije zikafutika bila kukusudia endapo kifaa kingine kinahifadhi wakati huo
+                         // huo taarifa nyingine kubwa (tatizo lililokuwa likitokea mara kwa mara).
 let firebaseAvailable = false;
 let temesaAuth = null; // Firebase Authentication ya kweli - inatatua tatizo la "kusahau nenosiri"
                         // lililokuwa likitokea kwa sababu manenosiri ya zamani yalihifadhiwa ndani
@@ -265,6 +269,7 @@ try{
   firebase.initializeApp(firebaseConfig);
   cloudDB = firebase.firestore();
   dbDocRef = cloudDB.collection('temesa_mwanza').doc('main_db');
+  usersDocRef = cloudDB.collection('temesa_mwanza').doc('users_registry');
   temesaAuth = firebase.auth();
   firebaseAvailable = true;
 }catch(e){
@@ -273,6 +278,41 @@ try{
 let cloudReady = false;      // true baada ya upakuaji wa kwanza kukamilika
 let cloudSuspiciousEmpty = false; // true endapo database mtandaoni imeonekana tupu kimashaka (angalia bootFromCloud)
 let applyingRemoteUpdate = false; // gubbly-guard: epuka mzunguko wa saveDB<->listener
+
+/* ---------------------------- WATUMIAJI: HIFADHI TOFAUTI (isiathiriwe na blob kubwa) ---------------------------- */
+async function saveUsersRegistry(){
+  if(!firebaseAvailable || !usersDocRef) return;
+  try{
+    await usersDocRef.set({ users: DB.users, updatedAt: new Date().toISOString() });
+  }catch(e){
+    console.error('Imeshindwa kuhifadhi orodha ya watumiaji', e);
+    toast('⚠️ Imeshindwa kuhifadhi akaunti mtandaoni. Angalia intaneti yako.','red');
+  }
+}
+async function loadUsersRegistry(){
+  if(!firebaseAvailable || !usersDocRef) return false;
+  try{
+    const snap = await usersDocRef.get({source:'server'});
+    if(snap.exists && Array.isArray(snap.data().users)){
+      DB.users = snap.data().users;
+      return true;
+    }
+  }catch(e){ console.error('Imeshindwa kupakia orodha ya watumiaji', e); }
+  return false;
+}
+function attachUsersRegistryListener(){
+  if(!firebaseAvailable || !usersDocRef) return;
+  usersDocRef.onSnapshot(snap=>{
+    if(snap.metadata.hasPendingWrites) return; // ni andiko letu wenyewe
+    if(!snap.exists || !Array.isArray(snap.data().users)) return;
+    DB.users = snap.data().users;
+    if(currentUser){
+      const fresh = DB.users.find(u=>u.id===currentUser.id);
+      if(fresh) currentUser = fresh;
+      if(document.getElementById('view_users')) renderUsers(document.getElementById('view_users'));
+    }
+  }, err=>console.warn('Users registry listener error', err));
+}
 
 /* ---------------------------- DATABASE LAYER ---------------------------- */
 const DB_KEY = "temesa_mwanza_db_v1";
@@ -554,6 +594,9 @@ function saveDB(){
   catch(e){ toast("Hifadhi ya kivinjari imeshindikana: " + e.message, "red"); }
   // Shadow copy in IndexedDB (survives some cases where localStorage alone is cleared)
   idbSet('data','db_snapshot', DB).catch(()=>{});
+  // Watumiaji (akaunti/majina/manenosiri) wanahifadhiwa KATIKA NYARAKA YAO TOFAUTI - angalia
+  // maelezo karibu na usersDocRef juu ya faili hili kwa sababu ya tatizo hili.
+  saveUsersRegistry();
   // Tuma nakala kwenye Firestore (database ya mtandaoni) ili vifaa vingine
   // vinavyofungua mfumo huu vione mabadiliko haya. Haizuii mtumiaji kuendelea
   // kufanya kazi hata kama mtandao ni hafifu — itajaribu tena kimya kimya.
@@ -5846,6 +5889,15 @@ async function bootFromCloud(){
     }
     cloudReady = true;
     updateCloudBadge(true);
+    // Watumiaji: pakia kutoka nyaraka yao TOFAUTI (angalia maelezo juu ya usersDocRef). Hii
+    // ndiyo chanzo halisi (source of truth) cha akaunti sasa - si tena sehemu ya blob kubwa.
+    const gotUsers = await loadUsersRegistry();
+    if(!gotUsers && DB.users && DB.users.length>0){
+      // Nyaraka ya watumiaji bado haijawahi kuundwa (mfumo unahamia kwenye muundo mpya kwa
+      // mara ya kwanza) - itengeneze sasa kutoka kwa watumiaji waliopo kwenye blob ya zamani.
+      await saveUsersRegistry();
+    }
+    attachUsersRegistryListener();
   }catch(e){
     console.error('Cloud boot failed, tunatumia nakala ya ndani (offline)', e);
     updateCloudBadge(false);
@@ -5875,8 +5927,14 @@ function attachCloudListener(){
       console.error('Ulinzi: kupuuza sasisho la mtandaoni lililokuwa na watumiaji=0 wakati kifaa hiki kina watumiaji halali.');
       return;
     }
+    // MUHIMU: Watumiaji (akaunti) sasa wanasimamiwa KATIKA NYARAKA YAO TOFAUTI (usersDocRef/
+    // attachUsersRegistryListener), SI kwenye blob hii kuu tena. Kama tungeruhusu "incoming.users"
+    // (ambayo inaweza kuwa nakala ya ZAMANI) kuandika juu ya DB.users hapa, tungerudisha lile lile
+    // tatizo la awali la "akaunti kufutika". Kwa hiyo tunahifadhi DB.users ya sasa bila kuigusa.
+    const preservedUsers = DB.users;
     applyingRemoteUpdate = true;
     DB = incoming;
+    DB.users = preservedUsers;
     try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
     if(currentUser){
       try{ buildSidebar(); render(); toast("Taarifa zimesasishwa — mabadiliko kutoka kifaa kingine yamepokelewa","green"); }
