@@ -3916,24 +3916,32 @@ function feedbackSubjectContact(f){
 }
 
 function renderFeedback(el){
-  const completedVehicles = DB.vehicles.filter(v=>v.status==='imekamilika');
-  const completedMifumo = DB.mifumoJobs.filter(j=>j.status==='imekamilika');
+  // MUHIMU: kazi zinazoonekana hapa ni ZILIZOKAMILIKA TU, na ndani ya SIKU 5 tangu kukamilika -
+  // baada ya hapo muda wa uangalizi (follow-up) unakuwa umeisha, hivyo hazionekani tena hapa.
+  const FOLLOWUP_WINDOW_DAYS = 5;
+  function completionDateOf(item){ return item.completedDate || (item.completedAt ? item.completedAt.slice(0,10) : null); }
+  function daysSinceCompletion(item){
+    const d = completionDateOf(item); if(!d) return Infinity;
+    return Math.floor((new Date(todayISO()) - new Date(d)) / 86400000);
+  }
+  const completedVehicles = DB.vehicles.filter(v=>v.status==='imekamilika' && daysSinceCompletion(v)<=FOLLOWUP_WINDOW_DAYS && daysSinceCompletion(v)>=0);
+  const completedMifumo = DB.mifumoJobs.filter(j=>j.status==='imekamilika' && daysSinceCompletion(j)<=FOLLOWUP_WINDOW_DAYS && daysSinceCompletion(j)>=0);
   const fbList = DB.feedback.filter(f=>inRange(f.date, feedbackRangeFilter)).slice().sort((a,b)=>new Date(b.date)-new Date(a.date));
   const preselectVal = feedbackPreselect ? `${feedbackPreselect.refType}:${feedbackPreselect.refId}` : '';
 
   el.innerHTML = `
   <div class="card" style="margin-bottom:18px;">
-    <div class="card-head"><h3>📞 Rekodi MAONI Mapya</h3><span class="hint">PS hupiga simu siku ya 1, 2 na 3 baada ya kazi kukamilika</span></div>
+    <div class="card-head"><h3>📞 Rekodi MAONI Mapya</h3><span class="hint">PS hupiga simu siku ya 1, 2 na 3 baada ya kazi kukamilika. Kazi huonekana hapa kwa siku ${FOLLOWUP_WINDOW_DAYS} tu tangu ikamilike.</span></div>
     <div class="card-pad">
       <div class="form-row">
         <div class="field"><label>Chagua Kazi *</label>
           <select id="fb_ref" onchange="showJobContactInfo(this.value); showNextServiceInfo(this.value)">
-            <option value="">— Chagua Kazi Iliyokamilika —</option>
+            <option value="">— Chagua Kazi Iliyokamilika (Siku 5 za Mwisho) —</option>
             <optgroup label="Magari">
-              ${completedVehicles.map(v=>`<option value="vehicle:${v.id}" ${preselectVal==='vehicle:'+v.id?'selected':''}>🚗 ${esc(v.regNo)} — ${esc(v.driverName||'Hana dereva')}</option>`).join('')}
+              ${completedVehicles.map(v=>`<option value="vehicle:${v.id}" ${preselectVal==='vehicle:'+v.id?'selected':''}>🚗 ${esc(v.regNo)} — ${esc(v.owner)}</option>`).join('') || '<option disabled>Hakuna gari lililokamilika ndani ya siku 5</option>'}
             </optgroup>
             <optgroup label="MIFUMO">
-              ${completedMifumo.map(j=>`<option value="mifumo:${j.id}" ${preselectVal==='mifumo:'+j.id?'selected':''}>${MIFUMO_TYPE_ICONS[j.jobType]||'⚡'} ${esc(j.jobType)} — ${esc(j.location)}</option>`).join('')}
+              ${completedMifumo.map(j=>`<option value="mifumo:${j.id}" ${preselectVal==='mifumo:'+j.id?'selected':''}>${MIFUMO_TYPE_ICONS[j.jobType]||'⚡'} ${esc(j.jobType)} — ${esc(j.location)}</option>`).join('') || '<option disabled>Hakuna kazi ya MIFUMO iliyokamilika ndani ya siku 5</option>'}
             </optgroup>
           </select>
         </div>
@@ -3975,25 +3983,27 @@ function showJobContactInfo(refVal){
   if(!box) return;
   if(!refVal){ box.innerHTML=''; return; }
   const [refType, refId] = refVal.split(':');
-  let name='', phone='';
+  let jobName='', owner='', name='', phone='';
   if(refType==='vehicle'){
     const v = vehicleById(refId);
     if(!v){ box.innerHTML=''; return; }
+    jobName = `${v.regNo} — ${UNIT_LABELS[v.unit]||''}`;
+    owner = v.owner||'';
     name = v.driverName||''; phone = v.driverPhone||'';
   } else {
     const j = mifumoJobById(refId);
     if(!j){ box.innerHTML=''; return; }
+    jobName = `${j.jobType} — ${j.location}`;
     const loc = DB.mifumoLocations.find(l=>l.id===j.mifumoLocId);
+    owner = loc ? (loc.location||'') : (j.location||'');
     name = loc ? (loc.contactName||'') : ''; phone = loc ? (loc.contactPhone||'') : '';
   }
-  if(!name && !phone){
-    box.innerHTML = `<div class="small" style="margin-bottom:12px;color:var(--slate);">Hakuna jina/namba ya simu iliyosajiliwa kwa ${refType==='vehicle'?'dereva wa gari hili':'mtu wa kuwasiliana wa kazi hii'}.</div>`;
-    return;
-  }
   box.innerHTML = `<div class="card-pad" style="background:#EFF6FF;border:1px solid var(--line);border-radius:9px;margin-bottom:14px;">
-    <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:6px;">📞 ${refType==='vehicle'?'Dereva wa Gari':'Mtu wa Kuwasiliana'}</div>
+    <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:6px;">📋 Taarifa za Kazi</div>
     <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;">
-      <div class="small">Jina: <b>${esc(name||'—')}</b></div>
+      <div class="small">Jina la Kazi: <b>${esc(jobName||'—')}</b></div>
+      <div class="small">Ofisi Inayomiliki: <b>${esc(owner||'—')}</b></div>
+      <div class="small">${refType==='vehicle'?'Mwakilishi/Dereva':'Mwakilishi wa Mwenye Kazi'}: <b>${esc(name||'—')}</b></div>
       <div class="small" style="display:flex;align-items:center;gap:6px;">Simu: <b>${esc(phone||'—')}</b> ${phone?`<button type="button" class="copybtn" onclick="navigator.clipboard.writeText('${esc(phone)}').then(()=>toast('Namba imenakiliwa: ${esc(phone)}','green'))">Nakili</button> <a href="tel:${esc(phone)}" class="copybtn" style="text-decoration:none;">Piga Simu</a>`:''}</div>
     </div>
   </div>`;
