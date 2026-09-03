@@ -280,8 +280,24 @@ let cloudSuspiciousEmpty = false; // true endapo database mtandaoni imeonekana t
 let applyingRemoteUpdate = false; // gubbly-guard: epuka mzunguko wa saveDB<->listener
 
 /* ---------------------------- WATUMIAJI: HIFADHI TOFAUTI (isiathiriwe na blob kubwa) ---------------------------- */
+/** Ulinzi: rekodi jina la mtumiaji la Msimamizi Mkuu tunalolijua kuwa sahihi, ili tuweze kugundua
+ *  endapo "toleo" jipya la orodha ya watumiaji (kutoka mtandaoni) limepungukiwa kimakosa (halina
+ *  Msimamizi Mkuu tena) - hali ambayo mara nyingi ni dalili ya kifaa/kikao kingine cha ZAMANI
+ *  kimetuma nakala yake ya kale badala ya iliyo sahihi zaidi, SI uamuzi wa kweli wa kumfuta. */
+function rememberKnownSuperAdmin(usersArr){
+  const sa = (usersArr||[]).find(u=>u.superAdmin);
+  if(sa){ try{ localStorage.setItem('temesa_known_superadmin_username', sa.username); }catch(e){} }
+}
+function usersListLooksSafe(incoming){
+  if(!Array.isArray(incoming)) return false;
+  let knownSA=null; try{ knownSA = localStorage.getItem('temesa_known_superadmin_username'); }catch(e){}
+  if(knownSA && !incoming.find(u=>u.username===knownSA)) return false; // Msimamizi Mkuu "amepotea" - shaka
+  if((DB.users||[]).length>0 && incoming.length===0) return false; // haiwezekani kuwa kweli imekuwa tupu ghafla
+  return true;
+}
 async function saveUsersRegistry(){
   if(!firebaseAvailable || !usersDocRef) return;
+  rememberKnownSuperAdmin(DB.users);
   try{
     await usersDocRef.set({ users: DB.users, updatedAt: new Date().toISOString() });
   }catch(e){
@@ -294,7 +310,13 @@ async function loadUsersRegistry(){
   try{
     const snap = await usersDocRef.get({source:'server'});
     if(snap.exists && Array.isArray(snap.data().users)){
-      DB.users = snap.data().users;
+      const incoming = snap.data().users;
+      if(!usersListLooksSafe(incoming)){
+        console.error('Ulinzi: orodha ya watumiaji kutoka Firestore inaonekana kupungua kimashaka (Msimamizi Mkuu hayupo). Kupuuza, tunaendelea na iliyopo.');
+        return false;
+      }
+      DB.users = incoming;
+      rememberKnownSuperAdmin(DB.users);
       return true;
     }
   }catch(e){ console.error('Imeshindwa kupakia orodha ya watumiaji', e); }
@@ -305,7 +327,13 @@ function attachUsersRegistryListener(){
   usersDocRef.onSnapshot(snap=>{
     if(snap.metadata.hasPendingWrites) return; // ni andiko letu wenyewe
     if(!snap.exists || !Array.isArray(snap.data().users)) return;
-    DB.users = snap.data().users;
+    const incoming = snap.data().users;
+    if(!usersListLooksSafe(incoming)){
+      console.error('Ulinzi: sasisho la watumiaji kutoka kifaa kingine limepuuzwa (linaonekana kupungua kimashaka).');
+      return;
+    }
+    DB.users = incoming;
+    rememberKnownSuperAdmin(DB.users);
     if(currentUser){
       const fresh = DB.users.find(u=>u.id===currentUser.id);
       if(fresh) currentUser = fresh;
@@ -5409,6 +5437,7 @@ function enterEmergencyMode(){
 function resetAllAccounts(){
   if(!confirm("Una uhakika? Hii itafuta AKAUNTI ZOTE kwenye kompyuta hii (si magari/mifumo/malipo). Huwezi kurudisha nyuma.")) return;
   DB.users = [];
+  try{ localStorage.removeItem('temesa_known_superadmin_username'); }catch(e){}
   saveDB();
   emergencyMode = false;
   localStorage.removeItem('temesa_current_user_id');
