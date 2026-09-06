@@ -4692,20 +4692,18 @@ function printValuation(id){
       ${row('6.0 Local/Resale Price — Market Value', fmtMoney(v.marketValue))}
     </table>
     <div style="font-weight:700;margin:14px 0 4px;">7.0 &nbsp; Valued By</div>
-    <table style="font-size:13px;">
-      ${row('Name', v.valuedByName)} ${row('Designation', v.valuedByDesig)}
-    </table>
-    <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:12.5px;">
-      <span>Sahihi: ______________________________</span>
-      <span>Tarehe: ${fmtDate(v.valuedByDate)}</span>
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px;font-size:11.5px;flex-wrap:nowrap;">
+      <span style="flex:1;min-width:0;">Name: <b>${esc(v.valuedByName||'—')}</b></span>
+      <span style="flex:1;min-width:0;">Designation: <b>${esc(v.valuedByDesig||'—')}</b></span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ______________</span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Tarehe: ${fmtDate(v.valuedByDate)}</span>
     </div>
     <div style="font-weight:700;margin:18px 0 4px;">8.0 &nbsp; Approved By</div>
-    <table style="font-size:13px;">
-      ${row('Name', v.approvedByName)} ${row('Designation', v.approvedByDesig)}
-    </table>
-    <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:12.5px;">
-      <span>Sahihi: ______________________________</span>
-      <span>Tarehe: ${fmtDate(v.approvedByDate)}</span>
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px;font-size:11.5px;flex-wrap:nowrap;">
+      <span style="flex:1;min-width:0;">Name: <b>${esc(v.approvedByName||'—')}</b></span>
+      <span style="flex:1;min-width:0;">Designation: <b>${esc(v.approvedByDesig||'—')}</b></span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ______________</span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Tarehe: ${fmtDate(v.approvedByDate)}</span>
     </div>
     <div style="text-align:center;margin-top:30px;font-size:13px;">
       <div style="margin-bottom:6px;">______________________________</div>
