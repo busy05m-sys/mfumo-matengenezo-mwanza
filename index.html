@@ -253,10 +253,10 @@ const firebaseConfig = {
 // yake unaendelea kwa nakala ya ndani (localStorage) tu, kama zamani.
 let cloudDB = null;
 let dbDocRef = null;
-let usersDocRef = null; // Nyaraka TOFAUTI kabisa kwa ajili ya watumiaji - imetenganishwa na "blob" kubwa
-                         // ya data nyingine (magari, wafanyakazi, malipo n.k) ili akaunti mpya/nenosiri
-                         // zisije zikafutika bila kukusudia endapo kifaa kingine kinahifadhi wakati huo
-                         // huo taarifa nyingine kubwa (tatizo lililokuwa likitokea mara kwa mara).
+let temesaUsersCollection = null; // KILA MTUMIAJI ANA HATI YAKE YENYEWE (kama KMM/KCL) - hii inamaliza
+                                   // KABISA tatizo la watumiaji "kufutika" kwa sababu hakuna tena
+                                   // "orodha moja" ya pamoja inayoweza kugongana/kuandikwa juu - kila
+                                   // kitendo (ongeza/hariri/futa) kinagusa hati YA MTU MMOJA TU.
 let firebaseAvailable = false;
 let temesaAuth = null; // Firebase Authentication ya kweli - inatatua tatizo la "kusahau nenosiri"
                         // lililokuwa likitokea kwa sababu manenosiri ya zamani yalihifadhiwa ndani
@@ -269,7 +269,7 @@ try{
   firebase.initializeApp(firebaseConfig);
   cloudDB = firebase.firestore();
   dbDocRef = cloudDB.collection('temesa_mwanza').doc('main_db');
-  usersDocRef = cloudDB.collection('temesa_mwanza').doc('users_registry');
+  temesaUsersCollection = cloudDB.collection('temesa_users');
   temesaAuth = firebase.auth();
   firebaseAvailable = true;
 }catch(e){
@@ -279,101 +279,45 @@ let cloudReady = false;      // true baada ya upakuaji wa kwanza kukamilika
 let cloudSuspiciousEmpty = false; // true endapo database mtandaoni imeonekana tupu kimashaka (angalia bootFromCloud)
 let applyingRemoteUpdate = false; // gubbly-guard: epuka mzunguko wa saveDB<->listener
 
-/* ---------------------------- WATUMIAJI: HIFADHI TOFAUTI (isiathiriwe na blob kubwa) ---------------------------- */
-/** Ulinzi: rekodi jina la mtumiaji la Msimamizi Mkuu tunalolijua kuwa sahihi, ili tuweze kugundua
- *  endapo "toleo" jipya la orodha ya watumiaji (kutoka mtandaoni) limepungukiwa kimakosa (halina
- *  Msimamizi Mkuu tena) - hali ambayo mara nyingi ni dalili ya kifaa/kikao kingine cha ZAMANI
- *  kimetuma nakala yake ya kale badala ya iliyo sahihi zaidi, SI uamuzi wa kweli wa kumfuta. */
-function rememberKnownSuperAdmin(usersArr){
-  const sa = (usersArr||[]).find(u=>u.superAdmin);
-  if(sa){ try{ localStorage.setItem('temesa_known_superadmin_username', sa.username); }catch(e){} }
-}
-function usersListLooksSafe(incoming){
-  if(!Array.isArray(incoming)) return false;
-  // Ulinzi rahisi na salama: kataa TU endapo orodha mpya inayokuja ni TUPU KABISA wakati
-  // kifaa hiki kina watumiaji halali kwa sasa - hii pekee inatosha kuzuia "kufutwa kwa
-  // bahati mbaya" bila hatari ya kukataa masasisho halali (jaribio la awali la kukumbuka
-  // "jina la Msimamizi Mkuu" kwenye kivinjari lilikuwa likisababisha makosa ya kukataa
-  // masasisho sahihi endapo akaunti ilibadilishwa wakati wa majaribio).
-  if((DB.users||[]).length>0 && incoming.length===0) return false;
-  return true;
-}
-async function saveUsersRegistry(){
-  if(!firebaseAvailable || !usersDocRef) return;
-  rememberKnownSuperAdmin(DB.users);
-  try{
-    await usersDocRef.set({ users: DB.users, updatedAt: new Date().toISOString() });
-  }catch(e){
-    console.error('Imeshindwa kuhifadhi orodha ya watumiaji', e);
-    toast('⚠️ Imeshindwa kuhifadhi akaunti mtandaoni. Angalia intaneti yako.','red');
-  }
-}
-/** NJIA SALAMA ZAIDI YA KUBADILISHA WATUMIAJI: "Firestore Transaction" - inasoma hali halisi ya
- *  sasa MOJA KWA MOJA kutoka Firestore, inatumia 'mutatorFn' kuibadilisha, kisha inaandika tena -
- *  yote haya YAKIWA KAZI MOJA ISIYOWEZA KUKATIZWA. Hii inazuia kabisa aina ya mzunguko mbaya
- *  (race condition) uliokuwa ukisababisha watumiaji "kupotea" mtu akiongeza wengine haraka
- *  mfululizo - kwa sababu HATUTEGEMEI tena nakala ya DB.users iliyopo kwenye kumbukumbu ya
- *  kivinjari (ambayo inaweza kuwa imepitwa na wakati), bali tunasoma-na-kuandika moja kwa moja.
- */
-async function mutateUsersRegistry(mutatorFn){
-  if(!firebaseAvailable || !usersDocRef || !cloudDB){
-    mutatorFn(DB.users);
-    saveDB();
-    return;
-  }
-  await cloudDB.runTransaction(async (tx)=>{
-    const snap = await tx.get(usersDocRef);
-    let users = (snap.exists && Array.isArray(snap.data().users)) ? snap.data().users.slice() : (DB.users||[]).slice();
-    mutatorFn(users);
-    tx.set(usersDocRef, { users, updatedAt: new Date().toISOString() });
-    DB.users = users;
-  });
-  rememberKnownSuperAdmin(DB.users);
-  try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
-}
-let usersRegistryDocExists = null; // null=haijulikani bado, true/false baada ya jaribio la kwanza la kweli kufika Firestore
-async function loadUsersRegistry(){
-  if(!firebaseAvailable || !usersDocRef) return false;
+/* ---------------------------- WATUMIAJI: HATI TOFAUTI KWA KILA MTU ---------------------------- */
+async function loadAllUsers(){
+  if(!firebaseAvailable || !temesaUsersCollection) return false;
   for(let attempt=1; attempt<=3; attempt++){
     try{
-      const snap = await usersDocRef.get({source:'server'});
-      usersRegistryDocExists = snap.exists;
-      if(snap.exists && Array.isArray(snap.data().users)){
-        const incoming = snap.data().users;
-        if(!usersListLooksSafe(incoming)){
-          console.error('Ulinzi: orodha ya watumiaji kutoka Firestore inaonekana kupungua kimashaka. Kupuuza, tunaendelea na iliyopo.');
-          return false;
-        }
-        DB.users = incoming;
-        rememberKnownSuperAdmin(DB.users);
-        return true;
-      }
-      return false; // doc haipo kabisa - si hitilafu ya mtandao, usijaribu tena
+      const snap = await temesaUsersCollection.get({source:'server'});
+      DB.users = snap.docs.map(d=>d.data());
+      return true;
     }catch(e){
-      console.error(`Imeshindwa kupakia orodha ya watumiaji (jaribio ${attempt}/3)`, e);
+      console.error(`Imeshindwa kupakia watumiaji (jaribio ${attempt}/3)`, e);
       if(attempt<3) await new Promise(r=>setTimeout(r, 700*attempt));
     }
   }
   return false;
 }
-function attachUsersRegistryListener(){
-  if(!firebaseAvailable || !usersDocRef) return;
-  usersDocRef.onSnapshot(snap=>{
-    if(snap.metadata.hasPendingWrites) return; // ni andiko letu wenyewe
-    if(!snap.exists || !Array.isArray(snap.data().users)) return;
-    const incoming = snap.data().users;
-    if(!usersListLooksSafe(incoming)){
-      console.error('Ulinzi: sasisho la watumiaji kutoka kifaa kingine limepuuzwa (linaonekana kupungua kimashaka).');
-      return;
-    }
-    DB.users = incoming;
-    rememberKnownSuperAdmin(DB.users);
+function attachUsersCollectionListener(){
+  if(!firebaseAvailable || !temesaUsersCollection) return;
+  temesaUsersCollection.onSnapshot(snap=>{
+    DB.users = snap.docs.map(d=>d.data());
     if(currentUser){
       const fresh = DB.users.find(u=>u.id===currentUser.id);
       if(fresh) currentUser = fresh;
       if(document.getElementById('view_users')) renderUsers(document.getElementById('view_users'));
     }
-  }, err=>console.warn('Users registry listener error', err));
+  }, err=>console.warn('Users collection listener error', err));
+}
+/** Hifadhi/sasisha MTUMIAJI MMOJA (hati yake yenyewe) - hakuna "orodha" ya kuandika upya. */
+async function saveOneUser(userObj){
+  if(!firebaseAvailable || !temesaUsersCollection){
+    try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
+    return;
+  }
+  await temesaUsersCollection.doc(userObj.id).set(userObj);
+  try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
+}
+/** Futa MTUMIAJI MMOJA (hati yake yenyewe). */
+async function deleteOneUser(userId){
+  if(!firebaseAvailable || !temesaUsersCollection) return;
+  await temesaUsersCollection.doc(userId).delete();
 }
 
 /* ---------------------------- DATABASE LAYER ---------------------------- */
@@ -657,7 +601,7 @@ function saveDB(){
   // Shadow copy in IndexedDB (survives some cases where localStorage alone is cleared)
   idbSet('data','db_snapshot', DB).catch(()=>{});
   // Kumbuka: mabadiliko ya WATUMIAJI (kuongeza/kuhariri/kufuta) sasa yanapita kwenye
-  // mutateUsersRegistry() (Firestore Transaction salama) - SI hapa tena - angalia
+  // saveOneUser()/deleteOneUser() (hati moja kwa moja) - SI hapa tena - angalia
   // createFirstAdmin/saveUser/deleteUser/resetAllAccounts.
   // Tuma nakala kwenye Firestore (database ya mtandaoni) ili vifaa vingine
   // vinavyofungua mfumo huu vione mabadiliko haya. Haizuii mtumiaji kuendelea
@@ -5497,8 +5441,10 @@ function enterEmergencyMode(){
 }
 function resetAllAccounts(){
   if(!confirm("Una uhakika? Hii itafuta AKAUNTI ZOTE kwenye kompyuta hii (si magari/mifumo/malipo). Huwezi kurudisha nyuma.")) return;
-  try{ localStorage.removeItem('temesa_known_superadmin_username'); }catch(e){}
-  mutateUsersRegistry(users=>{ users.length=0; }).then(()=>{
+  const deletions = (DB.users||[]).map(u=>deleteOneUser(u.id).catch(()=>{}));
+  Promise.all(deletions).then(()=>{
+    DB.users = [];
+    try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
     emergencyMode = false;
     localStorage.removeItem('temesa_current_user_id');
     renderSetupScreen();
@@ -5530,7 +5476,8 @@ async function createFirstAdmin(){
     await secApp.delete();
     const user = {id:uid('usr'), uid:newUid, username:email, fullName, role:'Msimamizi (Full Access)',
       allowedModules: ALL_MODULES.map(m=>m.id), isAdmin:true, superAdmin:true, canEdit:true, canDelete:true, active:true, createdAt:nowTime()};
-    await mutateUsersRegistry(users=>{ users.push(user); });
+    DB.users.push(user);
+    await saveOneUser(user);
     currentUser = user;
     localStorage.setItem('temesa_current_user_id', user.id);
     startApp();
@@ -5572,7 +5519,8 @@ async function attemptLogin(){
       profile = {id:uid('usr'), uid:verifiedUid, username:email, fullName:email.split('@')[0],
         role:'Msimamizi (Full Access)', allowedModules: ALL_MODULES.map(m=>m.id),
         isAdmin:true, superAdmin:true, canEdit:true, canDelete:true, active:true, createdAt:nowTime()};
-      await mutateUsersRegistry(users=>{ users.push(profile); });
+      DB.users.push(profile);
+      await saveOneUser(profile);
     }
     if(!profile || profile.active===false){
       showAuthError(profile ? 'Akaunti hii imezimwa. Wasiliana na Msimamizi.' : 'Akaunti hii haijasajiliwa kwenye mfumo huu. Wasiliana na Msimamizi.');
@@ -5825,13 +5773,14 @@ async function saveUser(id){
     // Kuhariri mtumiaji aliyepo: taarifa za ruhusa tu (barua pepe/nenosiri havibadilishwi hapa)
     const activeBox = document.getElementById('uf_active');
     const isActive = activeBox ? activeBox.checked : true;
-    await mutateUsersRegistry(users=>{
-      const u = users.find(x=>x.id===id);
-      if(u){ Object.assign(u, { fullName, role, allowedModules, isAdmin, canEdit, canDelete, active:isActive }); }
-    });
+    const u = DB.users.find(x=>x.id===id);
+    if(u){
+      Object.assign(u, { fullName, role, allowedModules, isAdmin, canEdit, canDelete, active:isActive });
+      await saveOneUser(u);
+    }
     closeModal(); toast("Taarifa za mtumiaji zimehifadhiwa","green");
     renderUsers(document.getElementById('view_users'));
-    if(id===currentUser?.id){ currentUser = DB.users.find(u=>u.id===id) || currentUser; buildSidebar(); }
+    if(id===currentUser?.id){ currentUser = u || currentUser; buildSidebar(); }
     return;
   }
   // Mtumiaji mpya: tengeneza akaunti ya Firebase Authentication BILA kuathiri kikao chako
@@ -5849,7 +5798,8 @@ async function saveUser(id){
     await secAuth.signOut();
     await secApp.delete();
     const newUser = {id:uid('usr'), uid:newUid, username:email, fullName, role, allowedModules, isAdmin, canEdit, canDelete, active:true, createdAt:nowTime()};
-    await mutateUsersRegistry(users=>{ users.push(newUser); });
+    DB.users.push(newUser);
+    await saveOneUser(newUser);
     closeModal();
     toast(`Mtumiaji ameongezwa. Mpe barua pepe: ${email} na nenosiri: ${pw}`,"green");
     renderUsers(document.getElementById('view_users'));
@@ -5863,10 +5813,8 @@ async function deleteUser(id){
   const target = DB.users.find(u=>u.id===id);
   if(target && target.superAdmin){ alert('Huwezi kufuta Msimamizi Mkuu.'); return; }
   if(!confirm("Una uhakika unataka kufuta mtumiaji huyu?")) return;
-  await mutateUsersRegistry(users=>{
-    const idx = users.findIndex(u=>u.id===id);
-    if(idx>=0) users.splice(idx,1);
-  });
+  DB.users = DB.users.filter(u=>u.id!==id);
+  await deleteOneUser(id);
   toast("Mtumiaji amefutwa","green");
   renderUsers(document.getElementById('view_users'));
 }
@@ -5987,20 +5935,25 @@ async function bootFromCloud(){
     }
     cloudReady = true;
     updateCloudBadge(true);
-    // Watumiaji: pakia kutoka nyaraka yao TOFAUTI (angalia maelezo juu ya usersDocRef). Hii
-    // ndiyo chanzo halisi (source of truth) cha akaunti sasa - si tena sehemu ya blob kubwa.
-    const gotUsers = await loadUsersRegistry();
-    if(!gotUsers && usersRegistryDocExists===false && DB.users && DB.users.length>0){
-      // Nyaraka ya watumiaji KWELI haijawahi kuundwa (si hitilafu ya mtandao) - itengeneze
-      // sasa kutoka kwa watumiaji waliopo kwenye blob ya zamani. Hii hutokea mara MOJA tu,
-      // wakati wa kuhamia kwenye muundo huu mpya.
-      await saveUsersRegistry();
-    } else if(!gotUsers && usersRegistryDocExists!==false){
-      // Nyaraka ipo lakini haikupatikana kwa sababu ya mtandao/hitilafu nyingine - USIANDIKE
-      // JUU YAKE kwa data ya zamani ya blob (hilo lingeweza kufuta watumiaji sahihi kimakosa).
-      toast("⚠️ Imeshindwa kuthibitisha orodha ya watumiaji kutoka mtandaoni. Baadhi ya akaunti mpya huenda zisionekane mpaka uweke upya ukurasa (refresh) ukiwa na mtandao mzuri.","red");
+    // Watumiaji: pakia kutoka kwenye "temesa_users" - kila mtu ana hati yake YENYEWE (angalia
+    // maelezo juu ya temesaUsersCollection). Hii ndiyo chanzo halisi cha akaunti sasa.
+    const oldBlobUsers = Array.isArray(DB.users) ? DB.users.slice() : [];
+    const gotUsers = await loadAllUsers();
+    if(!gotUsers){
+      if(oldBlobUsers.length>0 && DB.users.length===0){
+        // Firestore haikupatikana wakati wa kupakia - USIRUHUSU DB.users ibaki tupu (hilo
+        // lingeweza kuonekana kama "watumiaji wamepotea"). Tumia kwa muda nakala ya blob ya
+        // zamani (bora kuliko tupu) mpaka mtandao urejee.
+        DB.users = oldBlobUsers;
+      }
+      toast("⚠️ Imeshindwa kuthibitisha orodha ya watumiaji kutoka mtandaoni. Weka upya ukurasa (refresh) ukiwa na mtandao mzuri.","red");
+    } else if(DB.users.length===0 && oldBlobUsers.length>0){
+      // Mara ya kwanza kuhamia kwenye muundo mpya (temesa_users bado tupu) - hamisha
+      // watumiaji waliokuwepo kwenye blob ya zamani kwenda kwenye hati zao mpya, mmoja mmoja.
+      for(const u of oldBlobUsers){ await saveOneUser(u); }
+      DB.users = oldBlobUsers;
     }
-    attachUsersRegistryListener();
+    attachUsersCollectionListener();
   }catch(e){
     console.error('Cloud boot failed, tunatumia nakala ya ndani (offline)', e);
     updateCloudBadge(false);
@@ -6030,8 +5983,8 @@ function attachCloudListener(){
       console.error('Ulinzi: kupuuza sasisho la mtandaoni lililokuwa na watumiaji=0 wakati kifaa hiki kina watumiaji halali.');
       return;
     }
-    // MUHIMU: Watumiaji (akaunti) sasa wanasimamiwa KATIKA NYARAKA YAO TOFAUTI (usersDocRef/
-    // attachUsersRegistryListener), SI kwenye blob hii kuu tena. Kama tungeruhusu "incoming.users"
+    // MUHIMU: Watumiaji (akaunti) sasa wanasimamiwa KATIKA HATI ZAO BINAFSI (temesaUsersCollection/
+    // attachUsersCollectionListener), SI kwenye blob hii kuu tena. Kama tungeruhusu "incoming.users"
     // (ambayo inaweza kuwa nakala ya ZAMANI) kuandika juu ya DB.users hapa, tungerudisha lile lile
     // tatizo la awali la "akaunti kufutika". Kwa hiyo tunahifadhi DB.users ya sasa bila kuigusa.
     const preservedUsers = DB.users;
