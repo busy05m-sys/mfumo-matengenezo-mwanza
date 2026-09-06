@@ -290,9 +290,12 @@ function rememberKnownSuperAdmin(usersArr){
 }
 function usersListLooksSafe(incoming){
   if(!Array.isArray(incoming)) return false;
-  let knownSA=null; try{ knownSA = localStorage.getItem('temesa_known_superadmin_username'); }catch(e){}
-  if(knownSA && !incoming.find(u=>u.username===knownSA)) return false; // Msimamizi Mkuu "amepotea" - shaka
-  if((DB.users||[]).length>0 && incoming.length===0) return false; // haiwezekani kuwa kweli imekuwa tupu ghafla
+  // Ulinzi rahisi na salama: kataa TU endapo orodha mpya inayokuja ni TUPU KABISA wakati
+  // kifaa hiki kina watumiaji halali kwa sasa - hii pekee inatosha kuzuia "kufutwa kwa
+  // bahati mbaya" bila hatari ya kukataa masasisho halali (jaribio la awali la kukumbuka
+  // "jina la Msimamizi Mkuu" kwenye kivinjari lilikuwa likisababisha makosa ya kukataa
+  // masasisho sahihi endapo akaunti ilibadilishwa wakati wa majaribio).
+  if((DB.users||[]).length>0 && incoming.length===0) return false;
   return true;
 }
 async function saveUsersRegistry(){
@@ -328,21 +331,29 @@ async function mutateUsersRegistry(mutatorFn){
   rememberKnownSuperAdmin(DB.users);
   try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
 }
+let usersRegistryDocExists = null; // null=haijulikani bado, true/false baada ya jaribio la kwanza la kweli kufika Firestore
 async function loadUsersRegistry(){
   if(!firebaseAvailable || !usersDocRef) return false;
-  try{
-    const snap = await usersDocRef.get({source:'server'});
-    if(snap.exists && Array.isArray(snap.data().users)){
-      const incoming = snap.data().users;
-      if(!usersListLooksSafe(incoming)){
-        console.error('Ulinzi: orodha ya watumiaji kutoka Firestore inaonekana kupungua kimashaka (Msimamizi Mkuu hayupo). Kupuuza, tunaendelea na iliyopo.');
-        return false;
+  for(let attempt=1; attempt<=3; attempt++){
+    try{
+      const snap = await usersDocRef.get({source:'server'});
+      usersRegistryDocExists = snap.exists;
+      if(snap.exists && Array.isArray(snap.data().users)){
+        const incoming = snap.data().users;
+        if(!usersListLooksSafe(incoming)){
+          console.error('Ulinzi: orodha ya watumiaji kutoka Firestore inaonekana kupungua kimashaka. Kupuuza, tunaendelea na iliyopo.');
+          return false;
+        }
+        DB.users = incoming;
+        rememberKnownSuperAdmin(DB.users);
+        return true;
       }
-      DB.users = incoming;
-      rememberKnownSuperAdmin(DB.users);
-      return true;
+      return false; // doc haipo kabisa - si hitilafu ya mtandao, usijaribu tena
+    }catch(e){
+      console.error(`Imeshindwa kupakia orodha ya watumiaji (jaribio ${attempt}/3)`, e);
+      if(attempt<3) await new Promise(r=>setTimeout(r, 700*attempt));
     }
-  }catch(e){ console.error('Imeshindwa kupakia orodha ya watumiaji', e); }
+  }
   return false;
 }
 function attachUsersRegistryListener(){
@@ -2974,7 +2985,8 @@ function totalRevenueFor(range){
   const veh = DB.payments.filter(p=>inRange(p.date, range)).reduce((s,p)=>s+Number(p.amount||0),0);
   const mif = DB.mifumoPayments.filter(p=>inRange(p.date, range)).reduce((s,p)=>s+Number(p.amount||0),0);
   const park = DB.parkingFees.filter(p=>inRange(p.date, range)).reduce((s,p)=>s+Number(p.amount||0),0);
-  return {veh, mif, park, total: veh+mif+park};
+  const val = (DB.valuations||[]).filter(v=>inRange(v.date, range)).reduce((s,v)=>s+Number(v.fee||0),0);
+  return {veh, mif, park, val, total: veh+mif+park+val};
 }
 /** Jumla ya matumizi: matumizi ya moja kwa moja + posho + vitu vya workshop + vipuri vilivyonunuliwa. */
 function totalExpenditureFor(range){
@@ -3003,6 +3015,7 @@ function renderProfitLoss(el){
         <tr><td>Magari</td><td style="text-align:right;font-weight:700;">${fmtMoney(rev.veh)}</td></tr>
         <tr><td>MIFUMO</td><td style="text-align:right;font-weight:700;">${fmtMoney(rev.mif)}</td></tr>
         <tr><td>Ada za Parking</td><td style="text-align:right;font-weight:700;">${fmtMoney(rev.park)}</td></tr>
+        <tr><td>Ada za Uthamini (Valuation)</td><td style="text-align:right;font-weight:700;">${fmtMoney(rev.val)}</td></tr>
         <tr style="border-top:2px solid var(--line);"><td style="font-weight:800;">JUMLA</td><td style="text-align:right;font-weight:800;color:var(--green);">${fmtMoney(rev.total)}</td></tr>
       </tbody></table>
     </div>
@@ -4580,13 +4593,19 @@ function openValuationForm(){
 
       <div class="divider"></div>
       <div class="field"><label>6.0 &nbsp; Local/Resale Price — Market Value (TSh) *</label><input id="v_marketValue" type="number"></div>
-      <div class="field"><label>Ada ya Uthamini Iliyotozwa Mteja (TSh) <span class="opt">— hiari, kwa ajili ya taarifa ya makusanyo</span></label><input id="v_fee" type="number" placeholder="mf. 50000"></div>
+      <div class="field"><label>Ada ya Uthamini Iliyotozwa Mteja (TSh) <span class="opt">— hiari, HAIONEKANI kwenye ripoti iliyochapishwa, inaenda moja kwa moja kwenye taarifa ya makusanyo</span></label><input id="v_fee" type="number" placeholder="mf. 50000"></div>
 
       <div class="divider"></div>
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">7.0 &nbsp; Valued By</div>
       <div class="form-row">
         <div class="field"><label>Name</label><input id="v_valuedByName"></div>
-        <div class="field"><label>Designation</label><input id="v_valuedByDesig" placeholder="mf. Mech. Technician"></div>
+        <div class="field"><label>Designation</label>
+          <select id="v_valuedByDesig">
+            <option value="Mech. Technician (MT)">Mech. Technician (MT)</option>
+            <option value="Mech. Engineer (ME)">Mech. Engineer (ME)</option>
+            <option value="Regional Manager (RM)">Regional Manager (RM)</option>
+          </select>
+        </div>
       </div>
       <div class="field"><label>Tarehe</label><input id="v_valuedByDate" type="date" value="${todayISO()}"></div>
 
@@ -4594,7 +4613,13 @@ function openValuationForm(){
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">8.0 &nbsp; Approved By</div>
       <div class="form-row">
         <div class="field"><label>Name</label><input id="v_approvedByName"></div>
-        <div class="field"><label>Designation</label><input id="v_approvedByDesig"></div>
+        <div class="field"><label>Designation</label>
+          <select id="v_approvedByDesig">
+            <option value="Mech. Technician (MT)">Mech. Technician (MT)</option>
+            <option value="Mech. Engineer (ME)">Mech. Engineer (ME)</option>
+            <option value="Regional Manager (RM)">Regional Manager (RM)</option>
+          </select>
+        </div>
       </div>
       <div class="field"><label>Tarehe</label><input id="v_approvedByDate" type="date"></div>
     </div>
@@ -4665,18 +4690,23 @@ function printValuation(id){
     </table>
     <table style="font-size:13.5px;margin-top:8px;">
       ${row('6.0 Local/Resale Price — Market Value', fmtMoney(v.marketValue))}
-      ${v.fee ? row('Ada ya Uthamini Iliyotozwa', fmtMoney(v.fee)) : ''}
     </table>
     <div style="font-weight:700;margin:14px 0 4px;">7.0 &nbsp; Valued By</div>
     <table style="font-size:13px;">
-      ${row('Name', v.valuedByName)} ${row('Designation', v.valuedByDesig)} ${row('Date', fmtDate(v.valuedByDate))}
+      ${row('Name', v.valuedByName)} ${row('Designation', v.valuedByDesig)}
     </table>
-    <div style="margin-top:10px;font-size:12.5px;">Sahihi: ______________________________</div>
+    <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:12.5px;">
+      <span>Sahihi: ______________________________</span>
+      <span>Tarehe: ${fmtDate(v.valuedByDate)}</span>
+    </div>
     <div style="font-weight:700;margin:18px 0 4px;">8.0 &nbsp; Approved By</div>
     <table style="font-size:13px;">
-      ${row('Name', v.approvedByName)} ${row('Designation', v.approvedByDesig)} ${row('Date', fmtDate(v.approvedByDate))}
+      ${row('Name', v.approvedByName)} ${row('Designation', v.approvedByDesig)}
     </table>
-    <div style="margin-top:10px;font-size:12.5px;">Sahihi: ______________________________</div>
+    <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:12.5px;">
+      <span>Sahihi: ______________________________</span>
+      <span>Tarehe: ${fmtDate(v.approvedByDate)}</span>
+    </div>
     <div style="text-align:center;margin-top:30px;font-size:13px;">
       <div style="margin-bottom:6px;">______________________________</div>
       <div style="font-weight:700;">REGIONAL MANAGER<br>TEMESA – MWANZA</div>
@@ -5962,10 +5992,15 @@ async function bootFromCloud(){
     // Watumiaji: pakia kutoka nyaraka yao TOFAUTI (angalia maelezo juu ya usersDocRef). Hii
     // ndiyo chanzo halisi (source of truth) cha akaunti sasa - si tena sehemu ya blob kubwa.
     const gotUsers = await loadUsersRegistry();
-    if(!gotUsers && DB.users && DB.users.length>0){
-      // Nyaraka ya watumiaji bado haijawahi kuundwa (mfumo unahamia kwenye muundo mpya kwa
-      // mara ya kwanza) - itengeneze sasa kutoka kwa watumiaji waliopo kwenye blob ya zamani.
+    if(!gotUsers && usersRegistryDocExists===false && DB.users && DB.users.length>0){
+      // Nyaraka ya watumiaji KWELI haijawahi kuundwa (si hitilafu ya mtandao) - itengeneze
+      // sasa kutoka kwa watumiaji waliopo kwenye blob ya zamani. Hii hutokea mara MOJA tu,
+      // wakati wa kuhamia kwenye muundo huu mpya.
       await saveUsersRegistry();
+    } else if(!gotUsers && usersRegistryDocExists!==false){
+      // Nyaraka ipo lakini haikupatikana kwa sababu ya mtandao/hitilafu nyingine - USIANDIKE
+      // JUU YAKE kwa data ya zamani ya blob (hilo lingeweza kufuta watumiaji sahihi kimakosa).
+      toast("⚠️ Imeshindwa kuthibitisha orodha ya watumiaji kutoka mtandaoni. Baadhi ya akaunti mpya huenda zisionekane mpaka uweke upya ukurasa (refresh) ukiwa na mtandao mzuri.","red");
     }
     attachUsersRegistryListener();
   }catch(e){
