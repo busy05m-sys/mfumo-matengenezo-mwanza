@@ -2993,7 +2993,7 @@ function renderAppointments(el){
     <tbody>${upcoming.map(a=>`<tr>
       <td>${esc(a.date)}</td><td>${esc(a.time||'—')}</td><td style="font-weight:700;">${esc(a.title)}</td>
       <td>${esc(a.location||'—')}</td><td class="small">${esc(a.note||'—')}</td>
-      <td style="text-align:right;">${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteAppointment('${a.id}')">Futa</button>`:''}</td>
+      <td style="text-align:right;">${canEditNow()?`<button class="btn ghost sm" onclick="openAppointmentForm('${a.id}')">✏️ Hariri</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteAppointment('${a.id}')">Futa</button>`:''}</td>
     </tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna kikao/ratiba iliyopangwa</td></tr>`}</tbody></table></div>
   </div>
   <div class="card">
@@ -3001,33 +3001,40 @@ function renderAppointments(el){
     <div class="table-wrap"><table><thead><tr><th>Tarehe</th><th>Muda</th><th>Kichwa</th><th>Mahali</th><th></th></tr></thead>
     <tbody>${past.slice(0,15).map(a=>`<tr>
       <td>${esc(a.date)}</td><td>${esc(a.time||'—')}</td><td>${esc(a.title)}</td><td>${esc(a.location||'—')}</td>
-      <td style="text-align:right;">${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteAppointment('${a.id}')">Futa</button>`:''}</td>
+      <td style="text-align:right;">${canEditNow()?`<button class="btn ghost sm" onclick="openAppointmentForm('${a.id}')">✏️ Hariri</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteAppointment('${a.id}')">Futa</button>`:''}</td>
     </tr>`).join('') || `<tr><td colspan="5" class="empty">Hakuna historia bado</td></tr>`}</tbody></table></div>
   </div>`;
 }
-function openAppointmentForm(){
+function openAppointmentForm(id){
+  const a = id ? DB.appointments.find(x=>x.id===id) : null;
   openModal(`
-    <div class="modal-head"><h3>Ongeza Kikao/Ratiba</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-head"><h3>${a?'Hariri':'Ongeza'} Kikao/Ratiba</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
-      <div class="field"><label>Kichwa cha Habari *</label><input id="ap_title" placeholder="mf. Kikao na Katibu Tawala"></div>
+      <div class="field"><label>Kichwa cha Habari *</label><input id="ap_title" placeholder="mf. Kikao na Katibu Tawala" value="${a?esc(a.title):''}"></div>
       <div class="form-row">
-        <div class="field"><label>Tarehe *</label><input id="ap_date" type="date" value="${todayISO()}"></div>
-        <div class="field"><label>Muda</label><input id="ap_time" type="time"></div>
+        <div class="field"><label>Tarehe *</label><input id="ap_date" type="date" value="${a?a.date:todayISO()}"></div>
+        <div class="field"><label>Muda</label><input id="ap_time" type="time" value="${a?a.time||'':''}"></div>
       </div>
-      <div class="field"><label>Mahali</label><input id="ap_location" placeholder="mf. Ofisi ya Mkuu wa Mkoa"></div>
-      <div class="field"><label>Maelezo Zaidi</label><textarea id="ap_note" rows="2"></textarea></div>
+      <div class="field"><label>Mahali</label><input id="ap_location" placeholder="mf. Ofisi ya Mkuu wa Mkoa" value="${a?esc(a.location||''):''}"></div>
+      <div class="field"><label>Maelezo Zaidi</label><textarea id="ap_note" rows="2">${a?esc(a.note||''):''}</textarea></div>
     </div>
-    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveAppointment()">Hifadhi</button></div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveAppointment('${id||''}')">Hifadhi</button></div>
   `);
 }
-function saveAppointment(){
+function saveAppointment(id){
   const title = document.getElementById('ap_title').value.trim();
   const date = document.getElementById('ap_date').value;
   if(!title){ toast("Andika kichwa cha kikao/ratiba","red"); return; }
   if(!date){ toast("Weka tarehe","red"); return; }
-  DB.appointments.push({id:uid('apt'), title, date, time:document.getElementById('ap_time').value,
-    location:document.getElementById('ap_location').value.trim(), note:document.getElementById('ap_note').value.trim(), createdAt:nowTime()});
-  saveDB(); closeModal(); toast("Kikao/Ratiba kimehifadhiwa","green");
+  const data = {title, date, time:document.getElementById('ap_time').value,
+    location:document.getElementById('ap_location').value.trim(), note:document.getElementById('ap_note').value.trim()};
+  if(id){
+    const existing = DB.appointments.find(x=>x.id===id);
+    if(existing) Object.assign(existing, data);
+  } else {
+    DB.appointments.push(Object.assign({id:uid('apt'), createdAt:nowTime()}, data));
+  }
+  saveDB(); closeModal(); toast(id?"Kimesasishwa":"Kikao/Ratiba kimehifadhiwa","green");
   renderAppointments(document.getElementById('view_appointments'));
 }
 function deleteAppointment(id){
@@ -4495,14 +4502,15 @@ function renderValuation(el){
   <div class="card">
     <div class="table-wrap"><table><thead><tr><th>Namba ya Usajili</th><th>Mmiliki</th><th>Kusudi</th><th>Thamani ya Soko</th><th>Tarehe</th><th></th></tr></thead>
     <tbody>${list.map(v=>`<tr><td class="mono">${esc(v.regNo)}</td><td>${esc(v.owner)}</td><td>${esc(v.purpose||'—')}</td><td style="font-weight:700;">${fmtMoney(v.marketValue)}</td><td>${fmtDate(v.date)}</td>
-      <td style="text-align:right;"><button class="btn ghost sm" onclick="printValuation('${v.id}')">🖨️ Chapisha</button> ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('valuations','${v.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna ripoti ya uthamini bado</td></tr>`}</tbody></table></div>
+      <td style="text-align:right;"><button class="btn ghost sm" onclick="printValuation('${v.id}')">🖨️ Chapisha</button> ${canEditNow()?`<button class="btn ghost sm" onclick="openValuationForm('${v.id}')">✏️ Hariri</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('valuations','${v.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna ripoti ya uthamini bado</td></tr>`}</tbody></table></div>
   </div>
   `;
 }
 
-function openValuationForm(){
+function openValuationForm(id){
+  const v = id ? DB.valuations.find(x=>x.id===id) : null;
   openModal(`
-    <div class="modal-head"><h3>Ripoti ya Uthamini wa Gari (Vehicle Valuation Report)</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-head"><h3>${v?'Hariri':'Tengeneza'} Ripoti ya Uthamini wa Gari (Vehicle Valuation Report)</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
       <div class="field"><label>1.0 &nbsp; Owner Name *</label><input id="v_owner"></div>
       <div class="field"><label>2.0 &nbsp; Owner Address</label><input id="v_ownerAddr"></div>
@@ -4551,7 +4559,7 @@ function openValuationForm(){
           </select>
         </div>
       </div>
-      <div class="field"><label>Tarehe</label><input id="v_valuedByDate" type="date" value="${todayISO()}"></div>
+      <div class="field"><label>Tarehe</label><input id="v_valuedByDate" type="date" value="${v?v.valuedByDate:todayISO()}"></div>
 
       <div class="divider"></div>
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">8.0 &nbsp; Approved By</div>
@@ -4565,10 +4573,19 @@ function openValuationForm(){
           </select>
         </div>
       </div>
-      <div class="field"><label>Tarehe</label><input id="v_approvedByDate" type="date"></div>
+      <div class="field"><label>Tarehe</label><input id="v_approvedByDate" type="date" value="${v?v.approvedByDate:''}"></div>
     </div>
-    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveValuation()">Hifadhi Ripoti</button></div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveValuation('${id||''}')">Hifadhi Ripoti</button></div>
   `);
+  if(v){
+    const fields = ['owner','ownerAddr','regNo','make','model','engineNo','chassisNo','engineCap','speedo','yearPurchase','cifForeign','cifTshs','depPercent','depAmount','residual','tax','marketValue','fee','valuedByName','valuedByDesig','approvedByName','approvedByDesig'];
+    const map = {ownerAddr:'ownerAddress', engineCap:'engineCapacity'};
+    fields.forEach(f=>{
+      const el = document.getElementById('v_'+f);
+      if(el) el.value = v[map[f]||f] ?? '';
+    });
+    const fuelEl = document.getElementById('v_fuel'); if(fuelEl && v.fuel) fuelEl.value = v.fuel;
+  }
 }
 function recalcValuation(){
   const b = Number(document.getElementById('v_cifTshs').value)||0;
@@ -4578,13 +4595,13 @@ function recalcValuation(){
   document.getElementById('v_depAmount').value = d || '';
   document.getElementById('v_residual').value = b ? e : '';
 }
-function saveValuation(){
+function saveValuation(id){
   const owner = document.getElementById('v_owner').value.trim();
   const regNo = document.getElementById('v_regNo').value.trim();
   const marketValue = document.getElementById('v_marketValue').value;
   if(!owner || !regNo || !marketValue){ toast("Jaza taarifa muhimu (*)","red"); return; }
-  DB.valuations.push({
-    id:uid('val'), owner, ownerAddress:document.getElementById('v_ownerAddr').value.trim(),
+  const data = {
+    owner, ownerAddress:document.getElementById('v_ownerAddr').value.trim(),
     regNo, make:document.getElementById('v_make').value.trim(), model:document.getElementById('v_model').value.trim(),
     engineNo:document.getElementById('v_engineNo').value.trim(), chassisNo:document.getElementById('v_chassisNo').value.trim(),
     engineCapacity:document.getElementById('v_engineCap').value.trim(), fuel:document.getElementById('v_fuel').value,
@@ -4597,10 +4614,15 @@ function saveValuation(){
     valuedByDate:document.getElementById('v_valuedByDate').value,
     approvedByName:document.getElementById('v_approvedByName').value.trim(), approvedByDesig:document.getElementById('v_approvedByDesig').value.trim(),
     approvedByDate:document.getElementById('v_approvedByDate').value,
-    purpose:'', date: document.getElementById('v_valuedByDate').value||todayISO(),
-    createdAt:nowTime()
-  });
-  saveDB(); closeModal(); toast("Ripoti ya uthamini imehifadhiwa","green");
+    date: document.getElementById('v_valuedByDate').value||todayISO()
+  };
+  if(id){
+    const existing = DB.valuations.find(x=>x.id===id);
+    if(existing) Object.assign(existing, data);
+  } else {
+    DB.valuations.push(Object.assign({id:uid('val'), purpose:'', createdAt:nowTime()}, data));
+  }
+  saveDB(); closeModal(); toast(id?"Ripoti imesasishwa":"Ripoti ya uthamini imehifadhiwa","green");
   renderValuation(document.getElementById('view_valuation'));
 }
 function printValuation(id){
@@ -4682,16 +4704,17 @@ function renderRoadworthiness(el){
       <td><span class="badge ${r.exterior==='GOOD'?'green':r.exterior==='POOR'?'red':'amber'} dot">${esc(r.exterior||'—')}</span></td>
       <td><span class="badge ${r.brakeSystem==='GOOD'?'green':r.brakeSystem==='POOR'?'red':'amber'} dot">${esc(r.brakeSystem||'—')}</span></td>
       <td>${fmtDate(r.date)}</td>
-      <td style="text-align:right;"><button class="btn ghost sm" onclick="printRoadworthiness('${r.id}')">🖨️ Chapisha</button> ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('roadworthiness','${r.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna ripoti bado</td></tr>`}</tbody></table></div>
+      <td style="text-align:right;"><button class="btn ghost sm" onclick="printRoadworthiness('${r.id}')">🖨️ Chapisha</button> ${canEditNow()?`<button class="btn ghost sm" onclick="openRoadworthinessForm('${r.id}')">✏️ Hariri</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('roadworthiness','${r.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">Hakuna ripoti bado</td></tr>`}</tbody></table></div>
   </div>
   `;
 }
 function condSel(id, val){
   return `<select id="${id}"><option value="">—</option>${RW_COND_OPTIONS.map(o=>`<option ${val===o?'selected':''}>${o}</option>`).join('')}</select>`;
 }
-function openRoadworthinessForm(){
+function openRoadworthinessForm(id){
+  const r = id ? DB.roadworthiness.find(x=>x.id===id) : null;
   openModal(`
-    <div class="modal-head"><h3>Road Worthiness Report</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-head"><h3>${r?'Hariri':''} Road Worthiness Report</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">A: Details of Vehicle / Motor Cycle / Plant</div>
       <div class="form-row">
@@ -4726,40 +4749,40 @@ function openRoadworthinessForm(){
       <div class="divider"></div>
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">B. Validity of Car Documents</div>
       <div class="form-row">
-        <div class="field"><label>Road License</label>${condSel('rw_roadLicense')}</div>
-        <div class="field"><label>Insurance</label>${condSel('rw_insurance')}</div>
+        <div class="field"><label>Road License</label>${condSel('rw_roadLicense', r?r.roadLicense:'')}</div>
+        <div class="field"><label>Insurance</label>${condSel('rw_insurance', r?r.insurance:'')}</div>
       </div>
 
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">C: Body Outlook (Physical Appearance)</div>
       <div class="form-row">
-        <div class="field"><label>Exterior</label>${condSel('rw_exterior')}</div>
-        <div class="field"><label>Interior</label>${condSel('rw_interior')}</div>
+        <div class="field"><label>Exterior</label>${condSel('rw_exterior', r?r.exterior:'')}</div>
+        <div class="field"><label>Interior</label>${condSel('rw_interior', r?r.interior:'')}</div>
       </div>
 
       <div class="divider"></div>
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">Vipengele vya Kiufundi</div>
       <div class="form-row-3">
-        <div class="field"><label>Tyre Condition</label>${condSel('rw_tyre')}</div>
-        <div class="field"><label>Head Lamps</label>${condSel('rw_headlamps')}</div>
-        <div class="field"><label>Indicators</label>${condSel('rw_indicators')}</div>
+        <div class="field"><label>Tyre Condition</label>${condSel('rw_tyre', r?r.tyre:'')}</div>
+        <div class="field"><label>Head Lamps</label>${condSel('rw_headlamps', r?r.headlamps:'')}</div>
+        <div class="field"><label>Indicators</label>${condSel('rw_indicators', r?r.indicators:'')}</div>
       </div>
       <div class="form-row-3">
-        <div class="field"><label>Brake Lights/Reverse Lights</label>${condSel('rw_brakeLights')}</div>
-        <div class="field"><label>Wipers</label>${condSel('rw_wipers')}</div>
-        <div class="field"><label>Horn</label>${condSel('rw_horn')}</div>
+        <div class="field"><label>Brake Lights/Reverse Lights</label>${condSel('rw_brakeLights', r?r.brakeLights:'')}</div>
+        <div class="field"><label>Wipers</label>${condSel('rw_wipers', r?r.wipers:'')}</div>
+        <div class="field"><label>Horn</label>${condSel('rw_horn', r?r.horn:'')}</div>
       </div>
       <div class="form-row-3">
-        <div class="field"><label>Steering System</label>${condSel('rw_steering')}</div>
-        <div class="field"><label>Brake System</label>${condSel('rw_brakeSystem')}</div>
-        <div class="field"><label>Starting System</label>${condSel('rw_starting')}</div>
+        <div class="field"><label>Steering System</label>${condSel('rw_steering', r?r.steering:'')}</div>
+        <div class="field"><label>Brake System</label>${condSel('rw_brakeSystem', r?r.brakeSystem:'')}</div>
+        <div class="field"><label>Starting System</label>${condSel('rw_starting', r?r.starting:'')}</div>
       </div>
       <div class="form-row-3">
-        <div class="field"><label>Drivability</label>${condSel('rw_drivability')}</div>
-        <div class="field"><label>Suspension System</label>${condSel('rw_suspension')}</div>
-        <div class="field"><label>Transmission System</label>${condSel('rw_transmission')}</div>
+        <div class="field"><label>Drivability</label>${condSel('rw_drivability', r?r.drivability:'')}</div>
+        <div class="field"><label>Suspension System</label>${condSel('rw_suspension', r?r.suspension:'')}</div>
+        <div class="field"><label>Transmission System</label>${condSel('rw_transmission', r?r.transmission:'')}</div>
       </div>
       <div class="form-row">
-        <div class="field"><label>Clutch System</label>${condSel('rw_clutch')}</div>
+        <div class="field"><label>Clutch System</label>${condSel('rw_clutch', r?r.clutch:'')}</div>
         <div class="field"><label>Any Other Findings</label><input id="rw_otherFindings"></div>
       </div>
 
@@ -4767,23 +4790,27 @@ function openRoadworthinessForm(){
       <div class="field"><label>General Remarks</label><textarea id="rw_remarks"></textarea></div>
       <div class="form-row">
         <div class="field"><label>Inspected By</label><input id="rw_inspectedBy"></div>
-        <div class="field"><label>Tarehe</label><input id="rw_inspectedDate" type="date" value="${todayISO()}"></div>
+        <div class="field"><label>Tarehe</label><input id="rw_inspectedDate" type="date" value="${r?r.inspectedDate:todayISO()}"></div>
       </div>
       <div class="form-row">
         <div class="field"><label>Approved By</label><input id="rw_approvedBy"></div>
-        <div class="field"><label>Tarehe</label><input id="rw_approvedDate" type="date"></div>
+        <div class="field"><label>Tarehe</label><input id="rw_approvedDate" type="date" value="${r?r.approvedDate:''}"></div>
       </div>
     </div>
-    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveRoadworthiness()">Hifadhi Ripoti</button></div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveRoadworthiness('${id||''}')">Hifadhi Ripoti</button></div>
   `);
+  if(r){
+    const textFields = ['regNo','owner','yearPurchase','purchasePrice','capacity','accidents','hrsKm','minor','yearManuf','major','engineNo','chassisNo','location','ownerName','otherFindings','remarks','inspectedBy','approvedBy'];
+    textFields.forEach(f=>{ const el=document.getElementById('rw_'+f); if(el) el.value = r[f] ?? ''; });
+  }
 }
-function saveRoadworthiness(){
+function saveRoadworthiness(id){
   const regNo = document.getElementById('rw_regNo').value.trim();
   const owner = document.getElementById('rw_owner').value.trim();
   if(!regNo || !owner){ toast("Jaza taarifa muhimu (*)","red"); return; }
-  const g = id => document.getElementById(id).value;
-  DB.roadworthiness.push({
-    id:uid('rwr'), regNo, owner,
+  const g = fid => document.getElementById(fid).value;
+  const data = {
+    regNo, owner,
     yearPurchase:g('rw_yearPurchase'), purchasePrice:g('rw_purchasePrice'), capacity:g('rw_capacity'),
     accidents:g('rw_accidents'), hrsKm:g('rw_hrsKm'), minor:g('rw_minor'), yearManuf:g('rw_yearManuf'), major:g('rw_major'),
     engineNo:g('rw_engineNo'), chassisNo:g('rw_chassisNo'), location:g('rw_location'), ownerName:g('rw_ownerName'),
@@ -4794,9 +4821,15 @@ function saveRoadworthiness(){
     clutch:g('rw_clutch'), otherFindings:g('rw_otherFindings'),
     remarks:g('rw_remarks'), inspectedBy:g('rw_inspectedBy'), inspectedDate:g('rw_inspectedDate'),
     approvedBy:g('rw_approvedBy'), approvedDate:g('rw_approvedDate'),
-    date: g('rw_inspectedDate') || todayISO(), createdAt:nowTime()
-  });
-  saveDB(); closeModal(); toast("Road Worthiness Report imehifadhiwa","green");
+    date: g('rw_inspectedDate') || todayISO()
+  };
+  if(id){
+    const existing = DB.roadworthiness.find(x=>x.id===id);
+    if(existing) Object.assign(existing, data);
+  } else {
+    DB.roadworthiness.push(Object.assign({id:uid('rwr'), createdAt:nowTime()}, data));
+  }
+  saveDB(); closeModal(); toast(id?"Ripoti imesasishwa":"Road Worthiness Report imehifadhiwa","green");
   renderRoadworthiness(document.getElementById('view_roadworthiness'));
 }
 function printRoadworthiness(id){
@@ -4877,7 +4910,7 @@ function renderBoardingOff(el){
   <div class="card">
     <div class="table-wrap"><table><thead><tr><th>Namba</th><th>Location</th><th>Uamuzi</th><th>Tarehe</th><th></th></tr></thead>
     <tbody>${list.map(b=>`<tr><td class="mono">${esc(b.regNo)}</td><td>${esc(b.location||'—')}</td><td>${esc(b.action||'—')}</td><td>${fmtDate(b.date)}</td>
-      <td style="text-align:right;"><button class="btn ghost sm" onclick="printBoardingOff('${b.id}')">🖨️ Chapisha</button> ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('boardingOff','${b.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="5" class="empty">Hakuna ripoti bado</td></tr>`}</tbody></table></div>
+      <td style="text-align:right;"><button class="btn ghost sm" onclick="printBoardingOff('${b.id}')">🖨️ Chapisha</button> ${canEditNow()?`<button class="btn ghost sm" onclick="openBoardingOffForm('${b.id}')">✏️ Hariri</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('boardingOff','${b.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="5" class="empty">Hakuna ripoti bado</td></tr>`}</tbody></table></div>
   </div>
   `;
 }
@@ -4886,7 +4919,8 @@ function boSel(id, extra){
   return `<select id="${id}" ${extra||''}><option value="">—</option>${BO_COND_OPTIONS.map(o=>`<option>${o}</option>`).join('')}</select>`;
 }
 
-function openBoardingOffForm(){
+function openBoardingOffForm(id){
+  const b = id ? DB.boardingOff.find(x=>x.id===id) : null;
   let unitsHtml = '';
   BO_UNITS.forEach(sec=>{
     unitsHtml += `<div class="small" style="font-weight:700;color:var(--navy);margin:14px 0 8px;">${sec.section}</div><div class="form-row-3">`;
@@ -4896,7 +4930,7 @@ function openBoardingOffForm(){
     unitsHtml += `</div>`;
   });
   openModal(`
-    <div class="modal-head"><h3>Inspection / Boarding Off Form</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-head"><h3>${b?'Hariri':''} Inspection / Boarding Off Form</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">A. Details of Vehicles/Plants</div>
       <div class="form-row">
@@ -4946,11 +4980,11 @@ function openBoardingOffForm(){
         <div class="field"><label>Name (Mkaguzi)</label><input id="bo_inspectorName"></div>
         <div class="field"><label>Designation</label><input id="bo_inspectorDesig" placeholder="mf. RM"></div>
       </div>
-      <div class="field"><label>Tarehe</label><input id="bo_inspectorDate" type="date" value="${todayISO()}"></div>
+      <div class="field"><label>Tarehe</label><input id="bo_inspectorDate" type="date" value="${b?b.inspectorDate:todayISO()}"></div>
 
       <div class="divider"></div>
       <div class="small" style="font-weight:800;color:var(--navy);">Committee Recommendations After Re-inspection</div>
-      <div class="field"><label>Imekaguliwa na Kamati Tarehe</label><input id="bo_committeeDate" type="date"></div>
+      <div class="field"><label>Imekaguliwa na Kamati Tarehe</label><input id="bo_committeeDate" type="date" value="${b?b.committeeDate:''}"></div>
       <div class="field"><label>1. The Vehicle/Plant is</label>
         <select id="bo_action"><option>BOARDED</option><option>NOT BOARDED</option></select></div>
       <div class="field"><label>2. Uamuzi wa Kuondoshwa</label>
@@ -4959,38 +4993,43 @@ function openBoardingOffForm(){
           <option>(b) Transferred ... For re-use</option>
           <option>(c) Retained for cannibalization as detailed below</option>
         </select></div>
-      <div id="bo_transferBox" style="display:none;"><div class="field"><label>Kuhamishiwa Wapi</label><input id="bo_transferTo"></div></div>
+      <div id="bo_transferBox" style="display:${b&&(b.disposal||'').includes('Transferred')?'block':'none'};"><div class="field"><label>Kuhamishiwa Wapi</label><input id="bo_transferTo"></div></div>
       <div class="field"><label>Maelezo ya Cannibalization (kama yapo)</label><textarea id="bo_cannibalNotes"></textarea></div>
 
       <div class="divider"></div>
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">Wajumbe wa Bodi</div>
       <div class="form-row">
         <div class="field"><label>Chairman</label><input id="bo_chairman"></div>
-        <div class="field"><label>Tarehe</label><input id="bo_chairmanDate" type="date"></div>
+        <div class="field"><label>Tarehe</label><input id="bo_chairmanDate" type="date" value="${b?b.chairmanDate:''}"></div>
       </div>
       <div class="form-row">
         <div class="field"><label>Secretary</label><input id="bo_secretary"></div>
-        <div class="field"><label>Tarehe</label><input id="bo_secretaryDate" type="date"></div>
+        <div class="field"><label>Tarehe</label><input id="bo_secretaryDate" type="date" value="${b?b.secretaryDate:''}"></div>
       </div>
       <div class="form-row">
         <div class="field"><label>Member</label><input id="bo_member1"></div>
-        <div class="field"><label>Tarehe</label><input id="bo_member1Date" type="date"></div>
+        <div class="field"><label>Tarehe</label><input id="bo_member1Date" type="date" value="${b?b.member1Date:''}"></div>
       </div>
       <div class="form-row">
         <div class="field"><label>Member</label><input id="bo_member2"></div>
-        <div class="field"><label>Tarehe</label><input id="bo_member2Date" type="date"></div>
+        <div class="field"><label>Tarehe</label><input id="bo_member2Date" type="date" value="${b?b.member2Date:''}"></div>
       </div>
     </div>
-    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveBoardingOff()">Hifadhi Ripoti</button></div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveBoardingOff('${id||''}')">Hifadhi Ripoti</button></div>
   `);
+  if(b){
+    const textFields = ['regNo','yearPurchase','makeType','purchasePrice','capacity','accidents','engineNo','minor','chassisNo','major','mileage','lotNo','location','estCost','otherAttachments','recommendation','inspectorName','inspectorDesig','action','disposal','transferTo','cannibalNotes','chairman','secretary','member1','member2'];
+    textFields.forEach(f=>{ const el=document.getElementById('bo_'+f); if(el) el.value = b[f] ?? ''; });
+    BO_UNITS.forEach(sec=>sec.items.forEach(([key])=>{ const el=document.getElementById('bo_'+key); if(el) el.value = (b.units||{})[key] || ''; }));
+  }
 }
 
-function saveBoardingOff(){
+function saveBoardingOff(id){
   const regNo = document.getElementById('bo_regNo').value.trim();
   if(!regNo){ toast("Andika Namba ya Usajili","red"); return; }
-  const g = id => document.getElementById(id).value;
-  const record = {
-    id:uid('brd'), regNo,
+  const g = fid => document.getElementById(fid).value;
+  const data = {
+    regNo,
     yearPurchase:g('bo_yearPurchase'), makeType:g('bo_makeType'), purchasePrice:g('bo_purchasePrice'),
     capacity:g('bo_capacity'), accidents:g('bo_accidents'), engineNo:g('bo_engineNo'), minor:g('bo_minor'),
     chassisNo:g('bo_chassisNo'), major:g('bo_major'), mileage:g('bo_mileage'), lotNo:g('bo_lotNo'),
@@ -5000,11 +5039,16 @@ function saveBoardingOff(){
     disposal:g('bo_disposal'), transferTo:g('bo_transferTo'), cannibalNotes:g('bo_cannibalNotes'),
     chairman:g('bo_chairman'), chairmanDate:g('bo_chairmanDate'), secretary:g('bo_secretary'), secretaryDate:g('bo_secretaryDate'),
     member1:g('bo_member1'), member1Date:g('bo_member1Date'), member2:g('bo_member2'), member2Date:g('bo_member2Date'),
-    units:{}, date: g('bo_inspectorDate')||todayISO(), createdAt:nowTime()
+    units:{}, date: g('bo_inspectorDate')||todayISO()
   };
-  BO_UNITS.forEach(sec=>sec.items.forEach(([key])=>{ record.units[key] = g('bo_'+key); }));
-  DB.boardingOff.push(record);
-  saveDB(); closeModal(); toast("Inspection/Boarding Off Report imehifadhiwa","green");
+  BO_UNITS.forEach(sec=>sec.items.forEach(([key])=>{ data.units[key] = g('bo_'+key); }));
+  if(id){
+    const existing = DB.boardingOff.find(x=>x.id===id);
+    if(existing) Object.assign(existing, data);
+  } else {
+    DB.boardingOff.push(Object.assign({id:uid('brd'), createdAt:nowTime()}, data));
+  }
+  saveDB(); closeModal(); toast(id?"Ripoti imesasishwa":"Inspection/Boarding Off Report imehifadhiwa","green");
   renderBoardingOff(document.getElementById('view_boardingoff'));
 }
 
@@ -5093,30 +5137,31 @@ function renderTradeTest(el){
     <tbody>${list.map(t=>{ const g=ttGradeResult(t.gradeTotal);
       return `<tr><td class="mono">${esc(t.licenceNo)}</td><td>${esc(t.fullName)}</td><td style="font-weight:700;">${t.gradeTotal}%</td>
       <td><span class="badge ${g.cls} dot">${g.label}</span></td><td>${fmtDate(t.date)}</td>
-      <td style="text-align:right;"><button class="btn ghost sm" onclick="printTradeTestSheet('${t.id}')">🖨️ Alama</button> <button class="btn ghost sm" onclick="printTradeTestCert('${t.id}')">🖨️ Cheti</button> ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('tradeTests','${t.id}')">Futa</button>`:''}</td></tr>`;
+      <td style="text-align:right;"><button class="btn ghost sm" onclick="printTradeTestSheet('${t.id}')">🖨️ Alama</button> <button class="btn ghost sm" onclick="printTradeTestCert('${t.id}')">🖨️ Cheti</button> ${canEditNow()?`<button class="btn ghost sm" onclick="openTradeTestForm('${t.id}')">✏️ Hariri</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('tradeTests','${t.id}')">Futa</button>`:''}</td></tr>`;
     }).join('') || `<tr><td colspan="6" class="empty">Hakuna dereva aliyepimwa bado</td></tr>`}</tbody></table></div>
   </div>
   `;
 }
 
-function openTradeTestForm(){
+function openTradeTestForm(id){
+  const t = id ? DB.tradeTests.find(x=>x.id===id) : null;
   const theoryInputs = TT_THEORY_LABELS.map((l,i)=>`
     <div class="field"><label>${l} <span class="opt">(max ${TT_THEORY_MAX[i]})</span></label>
-      <input id="tt_theory${i}" type="number" max="${TT_THEORY_MAX[i]}" oninput="recalcTradeTest()"></div>`).join('');
+      <input id="tt_theory${i}" type="number" max="${TT_THEORY_MAX[i]}" oninput="recalcTradeTest()" value="${t?t.theory[i]:''}"></div>`).join('');
   const practicalInputs = TT_PRACTICAL_LABELS.map((l,i)=>`
     <div class="field"><label>${l} <span class="opt">(max ${TT_PRACTICAL_MAX[i]})</span></label>
-      <input id="tt_practical${i}" type="number" max="${TT_PRACTICAL_MAX[i]}" oninput="recalcTradeTest()"></div>`).join('');
+      <input id="tt_practical${i}" type="number" max="${TT_PRACTICAL_MAX[i]}" oninput="recalcTradeTest()" value="${t?t.practical[i]:''}"></div>`).join('');
   openModal(`
-    <div class="modal-head"><h3>Trade Test — Kupima Dereva</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-head"><h3>${t?'Hariri':''} Trade Test — Kupima Dereva</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
-      <div class="field"><label>Cert. No <span class="opt">(hiari — mf. TMS/MZA/012)</span></label><input id="tt_certNo" placeholder="TMS/MZA/……"></div>
+      <div class="field"><label>Cert. No <span class="opt">(hiari — mf. TMS/MZA/012)</span></label><input id="tt_certNo" placeholder="TMS/MZA/……" value="${t?esc(t.certNo):''}"></div>
       <div class="form-row">
-        <div class="field"><label>Licence No *</label><input id="tt_licenceNo"></div>
-        <div class="field"><label>Full Name *</label><input id="tt_fullName"></div>
+        <div class="field"><label>Licence No *</label><input id="tt_licenceNo" value="${t?esc(t.licenceNo):''}"></div>
+        <div class="field"><label>Full Name *</label><input id="tt_fullName" value="${t?esc(t.fullName):''}"></div>
       </div>
       <div class="form-row">
-        <div class="field"><label>Licence Classes</label><input id="tt_licenceClasses" placeholder="mf. A, C, C1, C2, C3, D, E"></div>
-        <div class="field"><label>Licence Exp. Date</label><input id="tt_licenceExp" type="date"></div>
+        <div class="field"><label>Licence Classes</label><input id="tt_licenceClasses" placeholder="mf. A, C, C1, C2, C3, D, E" value="${t?esc(t.licenceClasses):''}"></div>
+        <div class="field"><label>Licence Exp. Date</label><input id="tt_licenceExp" type="date" value="${t?t.licenceExp:''}"></div>
       </div>
 
       <div class="divider"></div>
@@ -5136,15 +5181,15 @@ function openTradeTestForm(){
       </div>
 
       <div class="form-row">
-        <div class="field"><label>Conducted By</label><input id="tt_conductedBy"></div>
-        <div class="field"><label>Approved By</label><input id="tt_approvedBy"></div>
+        <div class="field"><label>Conducted By</label><input id="tt_conductedBy" value="${t?esc(t.conductedBy):''}"></div>
+        <div class="field"><label>Approved By</label><input id="tt_approvedBy" value="${t?esc(t.approvedBy):''}"></div>
       </div>
       <div class="form-row">
-        <div class="field"><label>Tarehe</label><input id="tt_date" type="date" value="${todayISO()}"></div>
-        <div class="field"><label>Ada ya Mtihani Iliyotozwa (TSh) <span class="opt">— hiari</span></label><input id="tt_fee" type="number"></div>
+        <div class="field"><label>Tarehe</label><input id="tt_date" type="date" value="${t?t.date:todayISO()}"></div>
+        <div class="field"><label>Ada ya Mtihani Iliyotozwa (TSh) <span class="opt">— hiari</span></label><input id="tt_fee" type="number" value="${t?t.fee:''}"></div>
       </div>
     </div>
-    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveTradeTest()">Hifadhi</button></div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveTradeTest('${id||''}')">Hifadhi</button></div>
   `);
   recalcTradeTest();
 }
@@ -5160,7 +5205,7 @@ function recalcTradeTest(){
   const g = ttGradeResult(total);
   document.getElementById('tt_resultBadge').innerHTML = `<span class="badge ${g.cls} dot">${g.label}</span>`;
 }
-function saveTradeTest(){
+function saveTradeTest(id){
   const licenceNo = document.getElementById('tt_licenceNo').value.trim();
   const fullName = document.getElementById('tt_fullName').value.trim();
   if(!licenceNo || !fullName){ toast("Jaza Licence No na Full Name","red"); return; }
@@ -5168,15 +5213,20 @@ function saveTradeTest(){
   const practical = TT_PRACTICAL_MAX.map((max,i)=>Math.min(Number(document.getElementById('tt_practical'+i).value)||0, max));
   const totalA = theory.reduce((a,b)=>a+b,0);
   const totalB = practical.reduce((a,b)=>a+b,0);
-  DB.tradeTests.push({
-    id:uid('tt'), certNo:document.getElementById('tt_certNo').value.trim(), licenceNo, fullName,
+  const data = {
+    certNo:document.getElementById('tt_certNo').value.trim(), licenceNo, fullName,
     licenceClasses:document.getElementById('tt_licenceClasses').value.trim(), licenceExp:document.getElementById('tt_licenceExp').value,
     theory, practical, totalA, totalB, gradeTotal: totalA+totalB,
     conductedBy:document.getElementById('tt_conductedBy').value.trim(), approvedBy:document.getElementById('tt_approvedBy').value.trim(),
-    date:document.getElementById('tt_date').value||todayISO(), fee:Number(document.getElementById('tt_fee').value)||0,
-    createdAt:nowTime()
-  });
-  saveDB(); closeModal(); toast("Matokeo ya Trade Test yamehifadhiwa","green");
+    date:document.getElementById('tt_date').value||todayISO(), fee:Number(document.getElementById('tt_fee').value)||0
+  };
+  if(id){
+    const existing = DB.tradeTests.find(x=>x.id===id);
+    if(existing) Object.assign(existing, data);
+  } else {
+    DB.tradeTests.push(Object.assign({id:uid('tt'), createdAt:nowTime()}, data));
+  }
+  saveDB(); closeModal(); toast(id?"Matokeo yamesasishwa":"Matokeo ya Trade Test yamehifadhiwa","green");
   renderTradeTest(document.getElementById('view_tradetest'));
 }
 
