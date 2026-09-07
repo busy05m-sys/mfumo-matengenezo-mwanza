@@ -4393,11 +4393,11 @@ function triggerMergeImport(){ document.getElementById('mergeFile').click(); }
 function mergeImportBackup(evt){
   const file = evt.target.files[0]; if(!file) return;
   const reader = new FileReader();
-  reader.onload = function(e){
+  reader.onload = async function(e){
     try{
       const parsed = JSON.parse(e.target.result);
       const migrated = migrateDB((()=>{ const d=defaultDB(); for(const k in d){ if(parsed[k]!==undefined) d[k]=parsed[k]; } return d; })());
-      const counts = mergeImportedDB(migrated);
+      const counts = await mergeImportedDB(migrated);
       const totalAdded = Object.values(counts).reduce((a,b)=>a+b,0);
       if(totalAdded===0){
         toast("Hakuna rekodi mpya zilizopatikana — data hii tayari ipo au ni sawa na iliyopo","green");
@@ -4431,7 +4431,7 @@ const MERGE_LABELS = {
  *  de-duplicated by their natural key (registration no. / location name) so the same vehicle registered separately on
  *  two computers doesn't show up twice in the picker — any job records pointing at the removed duplicate are re-linked
  *  to the entry that was kept, so nothing breaks. */
-function mergeImportedDB(imported){
+async function mergeImportedDB(imported){
   const arraysToUnion = ['vehicles','staff','suppliers','spareParts','payments','consumables','feedback',
     'valuations','roadworthiness','boardingOff','tradeTests','parkingFees','mifumoJobs','mifumoPayments',
     'vehicleRegistry','mifumoLocations','users','stockLevels'];
@@ -4464,6 +4464,10 @@ function mergeImportedDB(imported){
   dedupeRegistry('vehicleRegistry', 'regNo', 'vehicles', 'vehicleRegId');
   dedupeRegistry('mifumoLocations', 'location', 'mifumoJobs', 'mifumoLocId');
   dedupeUsersByUsername();
+  // MUHIMU: watumiaji sasa wanahifadhiwa kwenye hati zao BINAFSI (temesa_users), SI kwenye blob
+  // hii kuu tena. Kuunganisha faili la JSON hapo juu kunabadilisha DB.users NDANI YA KIFAA HIKI
+  // TU - lazima kila mtumiaji atumwe kwenye Firestore mmoja mmoja ili vifaa vingine vimuone pia.
+  for(const u of DB.users){ await saveOneUser(u); }
   saveDB();
   return counts;
 }
@@ -5537,11 +5541,11 @@ function triggerRecoveryMerge(){ document.getElementById('recoveryMergeFile').cl
 function recoveryMergeImport(evt){
   const file = evt.target.files[0]; if(!file) return;
   const reader = new FileReader();
-  reader.onload = function(e){
+  reader.onload = async function(e){
     try{
       const parsed = JSON.parse(e.target.result);
       const migrated = migrateDB((()=>{ const d=defaultDB(); for(const k in d){ if(parsed[k]!==undefined) d[k]=parsed[k]; } return d; })());
-      mergeImportedDB(migrated);
+      await mergeImportedDB(migrated);
       alert("Akaunti (na taarifa nyingine mpya) zimeongezwa. Sasa jaribu kuingia tena.");
       renderLoginScreen();
     }catch(err){ alert("Faili si sahihi: "+err.message); }
