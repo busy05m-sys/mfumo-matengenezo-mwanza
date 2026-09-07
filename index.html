@@ -1192,6 +1192,8 @@ function renderDashboard(el){
 
   el.innerHTML = `
   ${renderAppointmentReminders()}
+  ${renderInspectedNotRepairedAlert()}
+  ${renderUnpaidAfterMonthAlert()}
   <div class="grid grid-4" style="margin-bottom:20px;">
     <div class="card stat blue"><div class="stat-bar"></div>
       <div class="stat-label">Jumla ya Magari</div><div class="stat-value">${totalVehicles}</div>
@@ -1318,6 +1320,50 @@ function renderAppointmentReminders(){
     </div>
   </div>`;
 }
+/** Magari yaliyokaguliwa (unit=ukaguzi, status=imekamilika) ambayo yamepita MWEZI MMOJA tangu
+ *  ukaguzi ukamilike bila kuendelea kuwa Matengenezo - alarm inayowakumbusha yafuatiliwe. */
+function renderInspectedNotRepairedAlert(){
+  const now = new Date();
+  const stale = DB.vehicles.filter(v=>{
+    if(v.unit!=='ukaguzi' || v.status!=='imekamilika') return false;
+    const d = v.completedAt ? new Date(v.completedAt) : (v.completedDate ? new Date(v.completedDate) : null);
+    if(!d) return false;
+    return (now - d) / (1000*60*60*24) >= 30;
+  }).sort((a,b)=> new Date(a.completedAt||a.completedDate) - new Date(b.completedAt||b.completedDate));
+  if(stale.length===0) return '';
+  return `<div class="card blink-alert" style="margin-bottom:16px;border:2px solid var(--amber);background:#FEF6E8;">
+    <div class="card-head" style="border:none;"><h3 style="color:#8A5A00;">⚠️ Alarm: Magari Yaliyokaguliwa Zaidi ya Mwezi Bila Matengenezo</h3></div>
+    <div class="card-pad" style="padding-top:0;">
+      ${stale.map(v=>{ const d = v.completedAt||v.completedDate; const days = Math.floor((now-new Date(d))/(1000*60*60*24));
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);">
+        <div><b>${esc(v.regNo)}</b> <span class="small">— ${esc(v.owner)}</span></div>
+        <div class="small" style="font-weight:700;color:#8A5A00;">Ukaguzi ulikamilika siku ${days} zilizopita</div>
+      </div>`; }).join('')}
+    </div>
+  </div>`;
+}
+/** Magari yaliyotengenezwa (unit=matengenezo, status=imekamilika) yasiyolipiwa, mwezi mmoja
+ *  baada ya matengenezo kukamilika - alarm ya kufuatilia malipo. */
+function renderUnpaidAfterMonthAlert(){
+  const now = new Date();
+  const stale = DB.vehicles.filter(v=>{
+    if(v.unit!=='matengenezo' || v.status!=='imekamilika' || v.paid) return false;
+    const d = v.completedAt ? new Date(v.completedAt) : (v.completedDate ? new Date(v.completedDate) : null);
+    if(!d) return false;
+    return (now - d) / (1000*60*60*24) >= 30;
+  }).sort((a,b)=> new Date(a.completedAt||a.completedDate) - new Date(b.completedAt||b.completedDate));
+  if(stale.length===0) return '';
+  return `<div class="card blink-alert" style="margin-bottom:16px;border:2px solid var(--red);background:#FFF7F5;">
+    <div class="card-head" style="border:none;"><h3 style="color:var(--red);">💰 Alarm: Matengenezo Yamekamilika Zaidi ya Mwezi Bado Hayajalipiwa</h3></div>
+    <div class="card-pad" style="padding-top:0;">
+      ${stale.map(v=>{ const d = v.completedAt||v.completedDate; const days = Math.floor((now-new Date(d))/(1000*60*60*24));
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);">
+        <div><b>${esc(v.regNo)}</b> <span class="small">— ${esc(v.owner)} — TZS ${fmtMoney(v.totalCost)}</span></div>
+        <div class="small" style="font-weight:700;color:var(--red);">Yamekamilika siku ${days} zilizopita, bado hayajalipiwa</div>
+      </div>`; }).join('')}
+    </div>
+  </div>`;
+}
 
 /* ============================== VEHICLES ============================== */
 let vehicleFilter = { unit:'all', status:'all', q:'' };
@@ -1409,9 +1455,10 @@ function openVehicleForm(){
       </div>
       <div id="vNewBox" style="display:none;">
         <div class="form-row">
-          <div class="field"><label>Namba ya Usajili *</label><input id="f_regNo" placeholder="mf. T 123 ABC"></div>
+          <div class="field"><label>Namba ya Usajili *</label><input id="f_regNo" placeholder="mf. T 123 ABC" oninput="checkNewRegNoDuplicate(this.value)"></div>
           <div class="field"><label>Mmiliki wa Gari *</label><input id="f_owner" placeholder="Jina la mmiliki / idara"></div>
         </div>
+        <div id="f_regNoWarning" style="display:none;background:#FCE9E9;border:1px solid var(--red);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12.5px;color:var(--red);font-weight:700;"></div>
         <div class="form-row">
           <div class="field"><label>Jina la Dereva</label><input id="f_dname" placeholder="Jina la dereva"></div>
           <div class="field"><label>Namba ya Simu ya Dereva</label><input id="f_dphone" placeholder="07XXXXXXXX"></div>
@@ -1437,6 +1484,21 @@ function setVehicleSource(src){
   document.querySelectorAll('#vSourceTabs .pill-tab').forEach(t=>t.classList.toggle('active', t.dataset.src===src));
   document.getElementById('vExistingBox').style.display = src==='existing' ? 'block' : 'none';
   document.getElementById('vNewBox').style.display = src==='new' ? 'block' : 'none';
+}
+/** Onyo la haraka wakati mtumiaji akiandika namba ya usajili chini ya "Gari Jipya" - kama tayari
+ *  lipo kwenye orodha, tunamwonya kabla hata hajajaribu kuhifadhi (angalia pia saveVehicle()). */
+function checkNewRegNoDuplicate(val){
+  const box = document.getElementById('f_regNoWarning');
+  if(!box) return;
+  const q = (val||'').trim().toUpperCase();
+  if(!q){ box.style.display='none'; return; }
+  const existing = DB.vehicleRegistry.find(x=>x.regNo.trim().toUpperCase()===q);
+  if(existing){
+    box.style.display='block';
+    box.textContent = `⛔ Gari "${existing.regNo}" LIMESHASAJILIWA (Mmiliki: ${existing.owner}). Tumia "Gari Lililopo" kutafuta na kuendelea nalo badala ya kulisajili tena.`;
+  } else {
+    box.style.display='none';
+  }
 }
 /** Live search-as-you-type across registration number, owner, AND driver name — so on a repeat visit,
  *  staff can find the vehicle by typing whichever they remember. */
@@ -1474,6 +1536,7 @@ function selectVehicleFromSearch(regId){
   document.getElementById('f_regSearchResults').style.display = 'none';
   const priorJobs = DB.vehicles.filter(v=>v.vehicleRegId===regId).slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
   const lastKm = priorJobs.length>0 ? priorJobs[0].currentKm : null;
+  const lastJob = priorJobs.length>0 ? priorJobs[0] : null;
   const infoBox = document.getElementById('vExistingInfo');
   infoBox.style.display = 'block';
   infoBox.innerHTML = `
@@ -1485,6 +1548,7 @@ function selectVehicleFromSearch(regId){
       <div class="small">Historia ya Kazi: <b>${priorJobs.length}</b></div>
       <div class="small">KM za Mwisho Kurekodiwa: <b>${lastKm!==null?Number(lastKm).toLocaleString()+' km':'Hazijulikani'}</b></div>
     </div>
+    ${lastJob ? `<div class="small" style="margin-top:6px;">Kazi ya Mwisho Iliyosajiliwa: <b>${fmtDate(lastJob.createdAt.slice(0,10))}</b> — Aina: <span class="badge ${lastJob.unit==='matengenezo'?'blue':'amber'} dot">${lastJob.unit==='matengenezo'?'Matengenezo':'Ukaguzi'}</span> — Hali: <span class="badge ${STATUS_LABELS[lastJob.status].cls} dot">${STATUS_LABELS[lastJob.status].label}</span></div>` : ''}
     <div class="small" style="margin-top:6px;color:var(--slate);">Jaza tu sehemu mpya chini (Kilomita za Sasa, Kitengo, na tatizo la sasa) — taarifa nyingine hazihitaji kuandikwa upya.</div>
   `;
   if(lastKm!==null && lastKm!==undefined){ document.getElementById('f_km').value = lastKm; }
@@ -1536,14 +1600,15 @@ function saveVehicle(){
     if(!regNo || !owner){ toast("Jaza Namba ya Usajili na Mmiliki","red"); return; }
     const driverName = document.getElementById('f_dname').value.trim();
     const driverPhone = document.getElementById('f_dphone').value.trim();
-    // Avoid duplicate registry entries if this reg no already exists
-    regEntry = DB.vehicleRegistry.find(x=>x.regNo.trim().toUpperCase()===regNo.toUpperCase());
-    if(!regEntry){
-      regEntry = {id:uid('vreg'), regNo, owner, driverName, driverPhone, createdAt:nowTime()};
-      DB.vehicleRegistry.push(regEntry);
-    } else {
-      regEntry.owner = owner; regEntry.driverName = driverName; regEntry.driverPhone = driverPhone;
+    // Gari haliruhusiwi kusajiliwa zaidi ya mara moja kama "Gari Jipya" - likiwepo tayari,
+    // mtumiaji anapaswa kutumia "Gari Lililopo" kuendelea na kazi mpya kwa gari hilo.
+    const existingReg = DB.vehicleRegistry.find(x=>x.regNo.trim().toUpperCase()===regNo.toUpperCase());
+    if(existingReg){
+      toast(`⛔ Gari hili (${existingReg.regNo}) LIMESHASAJILIWA tayari. Tumia "Gari Lililopo" kutafuta na kuendelea nalo.`,"red");
+      return;
     }
+    regEntry = {id:uid('vreg'), regNo, owner, driverName, driverPhone, createdAt:nowTime()};
+    DB.vehicleRegistry.push(regEntry);
   }
   if(!km || !need){ toast("Tafadhali jaza taarifa zote muhimu (*)", "red"); return; }
   const v = {
