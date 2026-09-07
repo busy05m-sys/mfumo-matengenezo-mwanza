@@ -4814,6 +4814,14 @@ function openRoadworthinessForm(id){
         <div class="field"><label>7. Present Location</label><input id="rw_location"></div>
         <div class="field"><label>12. Owner</label><input id="rw_ownerName"></div>
       </div>
+      <div class="form-row">
+        <div class="field"><label>13. Seating Capacity</label><input id="rw_seatingCapacity"></div>
+        <div class="field"><label>14. Tare Weight</label><input id="rw_tareWeight"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>15. Gross Weight</label><input id="rw_grossWeight"></div>
+        <div class="field"><label>16. Colour</label><input id="rw_colour"></div>
+      </div>
 
       <div class="divider"></div>
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">B. Validity of Car Documents</div>
@@ -4856,20 +4864,33 @@ function openRoadworthinessForm(id){
       </div>
 
       <div class="divider"></div>
-      <div class="field"><label>General Remarks</label><textarea id="rw_remarks"></textarea></div>
-      <div class="form-row">
-        <div class="field"><label>Inspected By</label><input id="rw_inspectedBy"></div>
+      <div class="field"><label>General Remarks</label>
+        <select id="rw_remarks">
+          <option>This Vehicle / Motorcycle / Plant is recommended to continue with Government use</option>
+          <option>This Vehicle / Motorcycle / Plant is recommended for Government use</option>
+          <option>This Vehicle / Motorcycle / Plant is recommended for Government registration</option>
+          <option>This Vehicle / Motorcycle / Plant is Not recommended to continue with Government use</option>
+          <option>This Vehicle / Motorcycle / Plant is Not recommended for Government use</option>
+          <option>This Vehicle / Motorcycle / Plant is Not recommended for Government registration</option>
+        </select>
+      </div>
+      <div class="small" style="font-weight:700;color:var(--navy);margin:14px 0 4px;">Inspected By</div>
+      <div class="form-row-3">
+        <div class="field"><label>Name</label><input id="rw_inspectedBy"></div>
+        <div class="field"><label>Designation</label><input id="rw_inspectedDesig"></div>
         <div class="field"><label>Tarehe</label><input id="rw_inspectedDate" type="date" value="${r?r.inspectedDate:todayISO()}"></div>
       </div>
-      <div class="form-row">
-        <div class="field"><label>Approved By</label><input id="rw_approvedBy"></div>
+      <div class="small" style="font-weight:700;color:var(--navy);margin:14px 0 4px;">Approved By</div>
+      <div class="form-row-3">
+        <div class="field"><label>Name</label><input id="rw_approvedBy"></div>
+        <div class="field"><label>Designation</label><input id="rw_approvedDesig"></div>
         <div class="field"><label>Tarehe</label><input id="rw_approvedDate" type="date" value="${r?r.approvedDate:''}"></div>
       </div>
     </div>
     <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveRoadworthiness('${id||''}')">Hifadhi Ripoti</button></div>
   `);
   if(r){
-    const textFields = ['regNo','owner','yearPurchase','purchasePrice','capacity','accidents','hrsKm','minor','yearManuf','major','engineNo','chassisNo','location','ownerName','otherFindings','remarks','inspectedBy','approvedBy'];
+    const textFields = ['regNo','owner','yearPurchase','purchasePrice','capacity','accidents','hrsKm','minor','yearManuf','major','engineNo','chassisNo','location','ownerName','seatingCapacity','tareWeight','grossWeight','colour','otherFindings','remarks','inspectedBy','inspectedDesig','approvedBy','approvedDesig'];
     textFields.forEach(f=>{ const el=document.getElementById('rw_'+f); if(el) el.value = r[f] ?? ''; });
   }
 }
@@ -4883,13 +4904,14 @@ function saveRoadworthiness(id){
     yearPurchase:g('rw_yearPurchase'), purchasePrice:g('rw_purchasePrice'), capacity:g('rw_capacity'),
     accidents:g('rw_accidents'), hrsKm:g('rw_hrsKm'), minor:g('rw_minor'), yearManuf:g('rw_yearManuf'), major:g('rw_major'),
     engineNo:g('rw_engineNo'), chassisNo:g('rw_chassisNo'), location:g('rw_location'), ownerName:g('rw_ownerName'),
+    seatingCapacity:g('rw_seatingCapacity'), tareWeight:g('rw_tareWeight'), grossWeight:g('rw_grossWeight'), colour:g('rw_colour'),
     roadLicense:g('rw_roadLicense'), insurance:g('rw_insurance'), exterior:g('rw_exterior'), interior:g('rw_interior'),
     tyre:g('rw_tyre'), headlamps:g('rw_headlamps'), indicators:g('rw_indicators'), brakeLights:g('rw_brakeLights'),
     wipers:g('rw_wipers'), horn:g('rw_horn'), steering:g('rw_steering'), brakeSystem:g('rw_brakeSystem'),
     starting:g('rw_starting'), drivability:g('rw_drivability'), suspension:g('rw_suspension'), transmission:g('rw_transmission'),
     clutch:g('rw_clutch'), otherFindings:g('rw_otherFindings'),
-    remarks:g('rw_remarks'), inspectedBy:g('rw_inspectedBy'), inspectedDate:g('rw_inspectedDate'),
-    approvedBy:g('rw_approvedBy'), approvedDate:g('rw_approvedDate'),
+    remarks:g('rw_remarks'), inspectedBy:g('rw_inspectedBy'), inspectedDesig:g('rw_inspectedDesig'), inspectedDate:g('rw_inspectedDate'),
+    approvedBy:g('rw_approvedBy'), approvedDesig:g('rw_approvedDesig'), approvedDate:g('rw_approvedDate'),
     date: g('rw_inspectedDate') || todayISO()
   };
   if(id){
@@ -4915,6 +4937,8 @@ function printRoadworthiness(id){
       ${row2('5. Year of Manufacture', r.yearManuf, '(b) Major', r.major)}
       ${row2('6. Engine No', r.engineNo, '11. Chassis No', r.chassisNo)}
       ${row2('7. Present Location', r.location, '12. Owner', r.ownerName)}
+      ${row2('13. Seating Capacity', r.seatingCapacity, '14. Tare Weight', r.tareWeight)}
+      ${row2('15. Gross Weight', r.grossWeight, '16. Colour', r.colour)}
     </table>
     <table style="font-size:12.5px;margin-top:10px;border:1px solid #ccc;">
       ${rowS('B. Road License', r.roadLicense)} ${rowS('Insurance', r.insurance)}
@@ -4928,11 +4952,17 @@ function printRoadworthiness(id){
       ${rowS('Clutch System', r.clutch)} ${rowS('Any Other Findings', r.otherFindings)}
     </table>
     <div style="margin-top:14px;font-size:12.5px;"><b>General Remarks:</b> ${esc(r.remarks||'…………………………………………………….')}</div>
-    <div style="margin-top:16px;font-size:12.5px;display:flex;justify-content:space-between;">
-      <div>Inspected by: <b>${esc(r.inspectedBy||'……………')}</b> &nbsp; Date: ${fmtDate(r.inspectedDate)}</div>
+    <div style="margin-top:16px;font-size:11.5px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:nowrap;">
+      <span style="flex:1;min-width:0;">Inspected by (Name): <b>${esc(r.inspectedBy||'—')}</b></span>
+      <span style="flex:1;min-width:0;">Designation: <b>${esc(r.inspectedDesig||'—')}</b></span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ______________</span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Tarehe: ${fmtDate(r.inspectedDate)}</span>
     </div>
-    <div style="margin-top:8px;font-size:12.5px;display:flex;justify-content:space-between;">
-      <div>Approved by: <b>${esc(r.approvedBy||'……………')}</b> &nbsp; Date: ${fmtDate(r.approvedDate)}</div>
+    <div style="margin-top:10px;font-size:11.5px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:nowrap;">
+      <span style="flex:1;min-width:0;">Approved by (Name): <b>${esc(r.approvedBy||'—')}</b></span>
+      <span style="flex:1;min-width:0;">Designation: <b>${esc(r.approvedDesig||'—')}</b></span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ______________</span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Tarehe: ${fmtDate(r.approvedDate)}</span>
     </div>
   `;
   printRawDocument(body);
@@ -5152,21 +5182,25 @@ function printBoardingOff(id){
       <tr><td style="padding:4px 8px;">Any Other Special Attachments</td><td colspan="3" style="padding:4px 8px;font-weight:700;color:var(--navy);">${esc(b.otherAttachments||'—')}</td></tr>
     </table>
     <div style="margin-top:14px;font-size:12.5px;text-align:center;font-weight:800;">${esc(b.recommendation||'')}</div>
-    <table style="font-size:12px;margin-top:8px;">
-      ${row2('Name', b.inspectorName, 'Designation', b.inspectorDesig)}
-      ${row2('Date', fmtDate(b.inspectorDate), '', '')}
-    </table>
+    <div style="margin-top:10px;font-size:11.5px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:nowrap;">
+      <span style="flex:1;min-width:0;">Name: <b>${esc(b.inspectorName||'—')}</b></span>
+      <span style="flex:1;min-width:0;">Designation: <b>${esc(b.inspectorDesig||'—')}</b></span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ______________</span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Tarehe: ${fmtDate(b.inspectorDate)}</span>
+    </div>
     <div style="font-weight:700;margin:16px 0 6px;">Committee Recommendations After Re-inspection</div>
     <div style="font-size:12.5px;">The Vehicle/Plant <b>${esc(b.regNo)}</b> has been inspected by this committee on ${fmtDate(b.committeeDate)} and the following action is approved.</div>
     <div style="font-size:12.5px;margin-top:6px;">1. The Vehicle/Plant is <b>${esc(b.action||'—')}</b></div>
     <div style="font-size:12.5px;margin-top:4px;">2. The vehicle/plant should immediately be: <b>${esc(b.disposal||'—')}</b> ${b.transferTo?('&nbsp; → '+esc(b.transferTo)):''}</div>
     ${b.cannibalNotes?`<div style="font-size:12.5px;margin-top:4px;">${esc(b.cannibalNotes).replace(/\n/g,'<br>')}</div>`:''}
-    <table style="font-size:12px;margin-top:14px;">
-      ${row2('Chairman', b.chairman, 'Date', fmtDate(b.chairmanDate))}
-      ${row2('Secretary', b.secretary, 'Date', fmtDate(b.secretaryDate))}
-      ${row2('Member', b.member1, 'Date', fmtDate(b.member1Date))}
-      ${row2('Member', b.member2, 'Date', fmtDate(b.member2Date))}
-    </table>
+    <div style="font-weight:700;margin:16px 0 6px;">Wajumbe wa Bodi</div>
+    ${[['Chairman',b.chairman,b.chairmanDate],['Secretary',b.secretary,b.secretaryDate],['Member',b.member1,b.member1Date],['Member',b.member2,b.member2Date]].map(([role,name,date])=>`
+    <div style="margin-top:8px;font-size:11.5px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:nowrap;">
+      <span style="flex:0 0 auto;white-space:nowrap;">${role}:</span>
+      <span style="flex:1;min-width:0;">Name: <b>${esc(name||'—')}</b></span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ………………</span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Tarehe: ${fmtDate(date)}</span>
+    </div>`).join('')}
   `;
   printRawDocument(body);
 }
