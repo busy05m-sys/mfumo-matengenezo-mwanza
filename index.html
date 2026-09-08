@@ -375,69 +375,85 @@ function defaultDB(){
  *  MUHIMU: usifute wala kupunguza hizi - Msimamizi anaweza tu KUBADILISHA UZITO (weight) kupitia
  *  "Mipangilio ya KPI", mradi jumla iendelee kuwa 100%. */
 const MAFUNDI_KPI_LIST = [
-  {key:'jobs_completed', label:'Jobs Completed / Productivity', weight:20},
-  {key:'quality_fix', label:'Quality / First-Time Fix', weight:15},
-  {key:'labour_efficiency', label:'Labour Efficiency', weight:15},
-  {key:'turnaround_time', label:'Turnaround Time', weight:10},
-  {key:'preventive_maintenance', label:'Preventive Maintenance', weight:10},
-  {key:'safety_compliance', label:'Safety Compliance', weight:10},
-  {key:'tools_parts_mgmt', label:'Tools & Spare Parts Management', weight:5},
-  {key:'documentation', label:'Documentation / Job Cards', weight:5},
-  {key:'attendance_discipline', label:'Attendance & Discipline', weight:5},
-  {key:'teamwork_service', label:'Teamwork / Customer Service', weight:5}
+  {key:'jobs_completed', label:'Jobs Completed / Productivity', weight:16},
+  {key:'quality_fix', label:'Quality / First-Time Fix', weight:12},
+  {key:'labour_efficiency', label:'Labour Efficiency', weight:12},
+  {key:'turnaround_time', label:'Turnaround Time', weight:8},
+  {key:'preventive_maintenance', label:'Preventive Maintenance', weight:8},
+  {key:'safety_compliance', label:'Safety Compliance', weight:8},
+  {key:'tools_parts_mgmt', label:'Tools & Spare Parts Management', weight:4},
+  {key:'documentation', label:'Documentation / Job Cards', weight:4},
+  {key:'attendance_discipline', label:'Attendance & Discipline', weight:4},
+  {key:'teamwork_service', label:'Teamwork / Customer Service', weight:4}
 ];
 const STOREKEEPER_KPI_LIST = [
-  {key:'stock_accuracy', label:'Stock Accuracy', weight:15},
-  {key:'issuing_efficiency', label:'Issuing Efficiency', weight:15},
-  {key:'stock_records', label:'Stock Records', weight:10},
-  {key:'stock_availability', label:'Stock Availability', weight:15},
-  {key:'grn_accuracy', label:'GRN / Receiving Accuracy', weight:15},
-  {key:'compliance', label:'Compliance', weight:10},
-  {key:'cleanliness_store', label:'Usafi wa Store / Mazingira', weight:10},
-  {key:'discipline', label:'Discipline', weight:5},
-  {key:'teamwork', label:'Teamwork', weight:5}
+  {key:'stock_accuracy', label:'Stock Accuracy', weight:12},
+  {key:'issuing_efficiency', label:'Issuing Efficiency', weight:12},
+  {key:'stock_records', label:'Stock Records', weight:8},
+  {key:'stock_availability', label:'Stock Availability', weight:12},
+  {key:'grn_accuracy', label:'GRN / Receiving Accuracy', weight:12},
+  {key:'compliance', label:'Compliance', weight:8},
+  {key:'cleanliness_store', label:'Usafi wa Store / Mazingira', weight:8},
+  {key:'discipline', label:'Discipline', weight:4},
+  {key:'teamwork', label:'Teamwork', weight:4}
 ];
 const PROCUREMENT_KPI_LIST = [
-  {key:'procurement_turnaround', label:'Procurement Turnaround', weight:20},
-  {key:'procurement_compliance', label:'Procurement Compliance', weight:15},
-  {key:'supplier_mgmt', label:'Supplier Management', weight:15},
-  {key:'documentation', label:'Documentation', weight:15},
-  {key:'value_for_money', label:'Value for Money', weight:15},
-  {key:'timeliness', label:'Timeliness', weight:10},
-  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
-  {key:'discipline', label:'Discipline', weight:5}
+  {key:'procurement_turnaround', label:'Procurement Turnaround', weight:16},
+  {key:'procurement_compliance', label:'Procurement Compliance', weight:12},
+  {key:'supplier_mgmt', label:'Supplier Management', weight:12},
+  {key:'documentation', label:'Documentation', weight:12},
+  {key:'value_for_money', label:'Value for Money', weight:12},
+  {key:'timeliness', label:'Timeliness', weight:8},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:4},
+  {key:'discipline', label:'Discipline', weight:4}
 ];
 const ACCOUNTANT_KPI_LIST = [
-  {key:'transaction_accuracy', label:'Transaction Accuracy', weight:20},
-  {key:'reconciliation', label:'Reconciliation', weight:15},
-  {key:'timely_reporting', label:'Timely Reporting', weight:15},
-  {key:'records', label:'Records', weight:15},
-  {key:'compliance', label:'Compliance', weight:15},
-  {key:'customer_service', label:'Customer / Internal Service', weight:10},
-  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
-  {key:'discipline', label:'Discipline', weight:5}
+  {key:'transaction_accuracy', label:'Transaction Accuracy', weight:16},
+  {key:'reconciliation', label:'Reconciliation', weight:12},
+  {key:'timely_reporting', label:'Timely Reporting', weight:12},
+  {key:'records', label:'Records', weight:12},
+  {key:'compliance', label:'Compliance', weight:12},
+  {key:'customer_service', label:'Customer / Internal Service', weight:8},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:4},
+  {key:'discipline', label:'Discipline', weight:4}
 ];
 const SECRETARY_KPI_LIST = [
-  {key:'reports_correspondence', label:'Reports / Correspondence', weight:20},
-  {key:'data_accuracy', label:'Data Accuracy', weight:15},
-  {key:'filing_records', label:'Filing / Records', weight:15},
-  {key:'timeliness', label:'Timeliness', weight:15},
-  {key:'customer_service', label:'Customer Service', weight:15},
-  {key:'office_support', label:'Office Support', weight:10},
-  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:5},
-  {key:'discipline', label:'Discipline', weight:5}
+  {key:'reports_correspondence', label:'Reports / Correspondence', weight:16},
+  {key:'data_accuracy', label:'Data Accuracy', weight:12},
+  {key:'filing_records', label:'Filing / Records', weight:12},
+  {key:'timeliness', label:'Timeliness', weight:12},
+  {key:'customer_service', label:'Customer Service', weight:12},
+  {key:'office_support', label:'Office Support', weight:8},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:4},
+  {key:'discipline', label:'Discipline', weight:4}
 ];
 /** Nafasi ambazo hazina KPI maalum kwenye taratibu - Msimamizi anaweka KPI zake mwenyewe kupitia
  *  Mipangilio ya KPI. Tumeweka default ya kuanzia inayotumika mpaka aibadilishe. */
 const GENERIC_SUPPORTING_KPI_LIST = [
-  {key:'quality_of_work', label:'Ubora wa Kazi', weight:25},
-  {key:'timeliness', label:'Utimilifu wa Muda', weight:20},
-  {key:'compliance', label:'Kufuata Taratibu (Compliance)', weight:15},
-  {key:'attendance', label:'Mahudhurio', weight:15},
-  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:10},
-  {key:'discipline', label:'Nidhamu', weight:10},
-  {key:'teamwork', label:'Ushirikiano Timu', weight:5}
+  {key:'quality_of_work', label:'Ubora wa Kazi', weight:20},
+  {key:'timeliness', label:'Utimilifu wa Muda', weight:16},
+  {key:'compliance', label:'Kufuata Taratibu (Compliance)', weight:12},
+  {key:'attendance', label:'Mahudhurio', weight:12},
+  {key:'cleanliness', label:'Usafi Binafsi / Mazingira', weight:8},
+  {key:'discipline', label:'Nidhamu', weight:8},
+  {key:'teamwork', label:'Ushirikiano Timu', weight:4}
 ];
+/** Vipengele vya JUMLA (General) - vinaongezwa kwa KILA nafasi (mafundi na supporting) juu ya vile
+ *  maalum vya kazi yake - jumla ya uzito wake ni 20%, orodha maalum za juu zimepunguzwa kutoka
+ *  100% kwenda 80% kuacha nafasi hii (angalia kila list hapo juu, tayari imepunguzwa). */
+const GENERAL_KPI_ADDITIONS = [
+  {key:'gen_attendance', label:'Attendance (Mahudhurio)', weight:2},
+  {key:'gen_creativity', label:'Creativity / Innovation', weight:3},
+  {key:'gen_task_completeness', label:'Task Completeness', weight:3},
+  {key:'gen_customer_care', label:'Customer Care', weight:3},
+  {key:'gen_response_time', label:'Response on Time', weight:2},
+  {key:'gen_integrity', label:'Integrity', weight:3},
+  {key:'gen_personal_appearance', label:'Personal Appearance', weight:2},
+  {key:'gen_work_environment', label:'Work Environment (Mazingira ya Kazi)', weight:1},
+  {key:'gen_others', label:'Others', weight:1}
+];
+[MAFUNDI_KPI_LIST, STOREKEEPER_KPI_LIST, PROCUREMENT_KPI_LIST, ACCOUNTANT_KPI_LIST, SECRETARY_KPI_LIST, GENERIC_SUPPORTING_KPI_LIST]
+  .forEach(list=>{ GENERAL_KPI_ADDITIONS.forEach(g=>list.push({...g})); });
 /** Ramani ya nafasi (position) kwenda kwenye KPI list yake. "category" inatumika kwenye Dashibodi
  *  kutofautisha Mafundi na Supporting Staff. "extraCleanliness" = true kwa Mafundi maana yake Usafi
  *  Binafsi & Mazingira ni KIPIMO CHA ZIADA (hakihesabiwi kwenye 100%) - kwa Supporting Staff tayari
@@ -448,11 +464,19 @@ const KPI_POSITIONS = {
   welder: {label:'Welder / Fabricator', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
   painter: {label:'Painter', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
   tyre_technician: {label:'Tyre / Service Technician', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  mechanical_engineer: {label:'Mechanical Engineer', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  electrical_engineer: {label:'Electrical Engineer', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  engineer_general: {label:'Engineer', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  electrician: {label:'Electrician', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
+  ac_technician: {label:'Air Condition Technician', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
   other_technical: {label:'Other Technical Staff', category:'mafundi', kpis:MAFUNDI_KPI_LIST, extraCleanliness:true, customizable:false},
   storekeeper: {label:'Storekeeper', category:'supporting', kpis:STOREKEEPER_KPI_LIST, extraCleanliness:false, customizable:true},
   procurement: {label:'Procurement', category:'supporting', kpis:PROCUREMENT_KPI_LIST, extraCleanliness:false, customizable:true},
   accountant: {label:'Accountant / Cashier', category:'supporting', kpis:ACCOUNTANT_KPI_LIST, extraCleanliness:false, customizable:true},
   secretary_admin: {label:'Secretary / Admin / Reception', category:'supporting', kpis:SECRETARY_KPI_LIST, extraCleanliness:false, customizable:true},
+  hr_admin_officer: {label:'HR / Administration Officer', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
+  records_archive: {label:'Records & Archive', category:'supporting', kpis:SECRETARY_KPI_LIST, extraCleanliness:false, customizable:true},
+  driver: {label:'Driver', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
   ict: {label:'ICT', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
   cleaner: {label:'Cleaner', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
   security: {label:'Security', category:'supporting', kpis:GENERIC_SUPPORTING_KPI_LIST, extraCleanliness:false, customizable:true},
@@ -545,11 +569,15 @@ function migrateDB(d){
     if(u.canEdit===undefined) u.canEdit = !!u.isAdmin;
     if(u.canDelete===undefined) u.canDelete = !!u.isAdmin;
   });
-  // Seed KPI templates (mara ya kwanza tu, au kama nafasi mpya imeongezwa kwenye KPI_POSITIONS baadaye)
+  // Seed KPI templates (mara ya kwanza tu kwa nafasi zinazoweza kubadilishwa (customizable), lakini
+  // nafasi zisizoweza kubadilishwa (customizable:false, kama Mafundi) ZINASASISHWA KILA WAKATI kutoka
+  // kwenye msimbo (code) - kwa sababu Msimamizi hawezi kuzihariri, lazima zibaki sawa na maboresho
+  // mapya (mfano vipengele vya "General" vilivyoongezwa) bila kumtegemea yeye kuvibadilisha mwenyewe.
   d.kpiTemplates = d.kpiTemplates || {};
   Object.keys(KPI_POSITIONS).forEach(key=>{
-    if(!d.kpiTemplates[key]){
-      const base = KPI_POSITIONS[key];
+    const base = KPI_POSITIONS[key];
+    const needsReseed = !d.kpiTemplates[key] || (!base.customizable && d.kpiTemplates[key].kpis.length !== base.kpis.length);
+    if(needsReseed){
       d.kpiTemplates[key] = { label: base.label, category: base.category, extraCleanliness: base.extraCleanliness,
         customizable: base.customizable, kpis: base.kpis.map(k=>({...k})) };
     }
