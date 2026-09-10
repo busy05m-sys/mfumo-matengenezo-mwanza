@@ -5338,11 +5338,9 @@ function openInspectionForm(id){
       <div class="field"><label>Ministry / Department</label><input id="in_ministryDept" value="${f?esc(f.ministryDept||''):''}"></div>
 
       <div class="divider"></div>
-      <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">DESCRIPTION <span class="opt" style="font-weight:400;">— jaza kila namba peke yake (acha wazi zisizohitajika)</span></div>
-      ${Array.from({length:15}).map((_,i)=>`<div class="field" style="display:flex;flex-direction:row;align-items:center;gap:8px;margin-bottom:6px;">
-        <span style="width:22px;flex-shrink:0;font-weight:700;color:var(--navy);text-align:right;">${i+1}.</span>
-        <input id="in_desc${i}" style="flex:1;" value="${f&&f.descriptions&&f.descriptions[i]?esc(f.descriptions[i]):''}">
-      </div>`).join('')}
+      <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">DESCRIPTION <span class="opt" style="font-weight:400;">— jaza mstari wa kwanza, bonyeza Enter (au "➕ Ongeza Mstari") kuendelea na unaofuata</span></div>
+      <div id="in_desc_list"></div>
+      <button type="button" class="btn ghost sm" id="in_desc_addBtn" onclick="addInspectionDescLine()" style="margin-bottom:6px;">➕ Ongeza Mstari</button>
 
       <div class="divider"></div>
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">Inspected By</div>
@@ -5369,6 +5367,43 @@ function openInspectionForm(id){
     </div>
     <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveInspectionForm('${id||''}')">Hifadhi</button></div>
   `);
+  resetInspectionDescList(f?f.descriptions:[]);
+}
+let inspDescCount = 0;
+function addInspectionDescLine(prefillValue){
+  if(inspDescCount>=15) return null;
+  inspDescCount++;
+  const i = inspDescCount;
+  const list = document.getElementById('in_desc_list');
+  const row = document.createElement('div');
+  row.className = 'field';
+  row.style.cssText = 'display:flex;flex-direction:row;align-items:center;gap:8px;margin-bottom:6px;';
+  row.innerHTML = `<span style="width:22px;flex-shrink:0;font-weight:700;color:var(--navy);text-align:right;">${i}.</span><input id="in_desc${i-1}" style="flex:1;">`;
+  list.appendChild(row);
+  const inp = row.querySelector('input');
+  inp.value = prefillValue || '';
+  inp.addEventListener('keydown', e=>{
+    if(e.key==='Enter'){
+      e.preventDefault();
+      if(inspDescCount<15){ addInspectionDescLine(); document.getElementById('in_desc'+inspDescCount).focus(); }
+    }
+  });
+  if(inspDescCount>=15){ const btn=document.getElementById('in_desc_addBtn'); if(btn) btn.style.display='none'; }
+  return inp;
+}
+/** Inaanzisha upya orodha ya DESCRIPTION - ikiwa kuna taarifa za awali (kuhariri), zinajazwa zote
+ *  pamoja na mstari mmoja wa ziada wazi kuendelea; ikiwa ni fomu mpya, mstari mmoja tu (1.) unaanza. */
+function resetInspectionDescList(existing){
+  inspDescCount = 0;
+  const list = document.getElementById('in_desc_list');
+  if(list) list.innerHTML='';
+  const btn = document.getElementById('in_desc_addBtn'); if(btn) btn.style.display='';
+  if(existing && existing.filter(Boolean).length){
+    existing.forEach(v=>{ if(v) addInspectionDescLine(v); });
+    if(inspDescCount<15) addInspectionDescLine('');
+  } else {
+    addInspectionDescLine('');
+  }
 }
 function saveInspectionForm(id){
   const vehicleNo = document.getElementById('in_vehicleNo').value.trim();
@@ -5376,7 +5411,8 @@ function saveInspectionForm(id){
   if(!vehicleNo){ toast("Andika Vehicle/Motor Cycle/Plant No","red"); return; }
   if(!date){ toast("Weka tarehe","red"); return; }
   const g = fid => document.getElementById(fid).value.trim();
-  const descriptions = Array.from({length:15}).map((_,i)=> document.getElementById('in_desc'+i).value.trim());
+  const descriptions = [];
+  for(let i=0;i<inspDescCount;i++){ const el = document.getElementById('in_desc'+i); if(el) descriptions.push(el.value.trim()); }
   const data = {
     refNo:g('in_refNo'), date, vehicleNo, kmHrs:g('in_kmHrs'), make:g('in_make'), type:g('in_type'), model:g('in_model'),
     chassisNo:g('in_chassisNo'), engineNo:g('in_engineNo'), workLocation:g('in_workLocation'), ministryDept:g('in_ministryDept'),
