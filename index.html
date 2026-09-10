@@ -351,6 +351,7 @@ function defaultDB(){
     valuations: [],          // Valuation reports
     roadworthiness: [],      // Roadworthiness reports
     boardingOff: [],         // Boarding-off reports
+    inspectionForms: [],     // TMSM 3 - Vehicle Inspection/Maintenance Report forms
     tradeTests: [],          // Driver trade test results / certificates
     parkingFees: [],         // Parking fee collections
     mifumoJobs: [],          // Kazi za MIFUMO: Umeme, Generator, AC, TEHAMA, CCTV, n.k.
@@ -808,7 +809,7 @@ function maybeAutoBackup(){
 
 /** Shown on load if the whole database looks empty — helps recover from a "lost data" situation instead of silently starting over. */
 function checkForDataRecovery(){
-  const keys = ['vehicles','staff','suppliers','spareParts','payments','consumables','feedback','valuations','roadworthiness','boardingOff','tradeTests','parkingFees','mifumoJobs'];
+  const keys = ['vehicles','staff','suppliers','spareParts','payments','consumables','feedback','valuations','roadworthiness','boardingOff','tradeTests','parkingFees','mifumoJobs','inspectionForms'];
   const empty = keys.every(k => (DB[k]||[]).length === 0);
   if(empty && !localStorage.getItem('temesa_seen_recovery_prompt')){
     openModal(`
@@ -973,6 +974,7 @@ const NAV = [
     {id:"parkingfees", label:"Ada za Parking", ic:"🅿️"},
     {id:"roadworthiness", label:"Roadworthiness Report", ic:"✅"},
     {id:"boardingoff", label:"Boarding Off Report", ic:"📤"},
+    {id:"inspection", label:"Fomu ya Ukaguzi (TMSM 3)", ic:"📝"},
   ]},
   {group:"Taarifa", items:[
     {id:"reports", label:"Ripoti Zinazochapishwa", ic:"🖨️"},
@@ -1000,6 +1002,7 @@ const PAGE_META = {
   parkingfees:["Ada za Parking","Rekodi ada za maegesho zilizokusanywa"],
   roadworthiness:["Roadworthiness Report","Tengeneza na chapisha ripoti ya uwezo wa gari kutumika barabarani"],
   boardingoff:["Boarding Off Report","Tengeneza na chapisha ripoti ya kuondoa gari kwenye matumizi"],
+  inspection:["Fomu ya Ukaguzi (TMSM 3)","Jaza na chapisha 'Vehicle Inspection / Maintenance Report' rasmi"],
   reports:["Ripoti","Chagua ripoti na uichapishe"],
   users:["Watumiaji & Ruhusa","Simamia akaunti za watumiaji na wanachoweza kuona/kufanya"],
   appointments:["Vikao & Ratiba za Meneja","Panga na fuatilia vikao na ratiba za nje"],
@@ -1010,14 +1013,14 @@ const PAGE_META = {
 const ALL_MODULES = NAV.flatMap(g=>g.items).filter(i=>i.id!=='users');
 const ROLE_PRESETS = {
   "Msimamizi (Full Access)": {isAdmin:true, modules: ALL_MODULES.map(m=>m.id)},
-  "Meneja wa Mkoa": {isAdmin:false, modules: ['dashboard','vehicles','mifumo','staff','performance','allowances','finance','expenditures','profitloss','reports','feedback','valuation','tradetest','parkingfees','roadworthiness','boardingoff','appointments','kpi']},
+  "Meneja wa Mkoa": {isAdmin:false, modules: ['dashboard','vehicles','mifumo','staff','performance','allowances','finance','expenditures','profitloss','reports','feedback','valuation','tradetest','parkingfees','roadworthiness','boardingoff','inspection','appointments','kpi']},
   "Mhasibu": {isAdmin:false, modules: ['dashboard','finance','expenditures','profitloss','allowances','reports','parkingfees']},
   "Mgavi": {isAdmin:false, modules: ['dashboard','parts','consumables']},
-  "Fundi wa Ukaguzi": {isAdmin:false, modules: ['dashboard','vehicles','roadworthiness','feedback']},
+  "Fundi wa Ukaguzi": {isAdmin:false, modules: ['dashboard','vehicles','roadworthiness','inspection','feedback']},
   "Fundi wa Matengenezo": {isAdmin:false, modules: ['dashboard','vehicles','parts','consumables','feedback']},
   "Fundi wa MIFUMO": {isAdmin:false, modules: ['dashboard','mifumo','feedback']},
   "Person Secretary (PS)": {isAdmin:false, modules: ['dashboard','feedback']},
-  "Afisa Tawala": {isAdmin:false, modules: ['dashboard','valuation','tradetest','roadworthiness','boardingoff','parkingfees','reports']},
+  "Afisa Tawala": {isAdmin:false, modules: ['dashboard','valuation','tradetest','roadworthiness','boardingoff','inspection','parkingfees','reports']},
   "Custom (Chagua Mwenyewe)": {isAdmin:false, modules: []}
 };
 let currentUser = null;
@@ -1142,6 +1145,7 @@ function render(){
     parkingfees: renderParkingFees,
     roadworthiness: renderRoadworthiness,
     boardingoff: renderBoardingOff,
+    inspection: renderInspection,
     reports: renderReports,
     users: renderUsers,
     appointments: renderAppointments,
@@ -1370,27 +1374,63 @@ function renderInspectedNotRepairedAlert(){
     </div>
   </div>`;
 }
-/** Magari yaliyotengenezwa (unit=matengenezo, status=imekamilika) yasiyolipiwa, mwezi mmoja
- *  baada ya matengenezo kukamilika - alarm ya kufuatilia malipo. */
-function renderUnpaidAfterMonthAlert(){
+/** Matengenezo (magari NA mifumo) yaliyokamilika lakini hayajalipiwa, tangu siku 14 zilizopita na
+ *  kuendelea - onyo hili linaonekana KAMA POPUP moja kwa moja unapoingia (si kadi tu kwenye
+ *  Dashibodi), ili lisikosewe. Kizingiti kilipunguzwa kutoka siku 30 kwenda 14 kwa ombi la Msimamizi. */
+const UNPAID_ALERT_DAYS = 14;
+function getUnpaidStaleItems(){
   const now = new Date();
-  const stale = DB.vehicles.filter(v=>{
+  const fromVehicles = DB.vehicles.filter(v=>{
     if(v.unit!=='matengenezo' || v.status!=='imekamilika' || v.paid) return false;
     const d = v.completedAt ? new Date(v.completedAt) : (v.completedDate ? new Date(v.completedDate) : null);
     if(!d) return false;
-    return (now - d) / (1000*60*60*24) >= 30;
-  }).sort((a,b)=> new Date(a.completedAt||a.completedDate) - new Date(b.completedAt||b.completedDate));
+    return (now - d) / (1000*60*60*24) >= UNPAID_ALERT_DAYS;
+  }).map(v=>({ type:'gari', label:v.regNo, sub:v.owner, cost:v.totalCost, d:v.completedAt||v.completedDate }));
+  const fromMifumo = DB.mifumoJobs.filter(j=>{
+    if(j.status!=='imekamilika' || j.paid) return false;
+    const d = j.completedAt ? new Date(j.completedAt) : (j.completedDate ? new Date(j.completedDate) : null);
+    if(!d) return false;
+    return (now - d) / (1000*60*60*24) >= UNPAID_ALERT_DAYS;
+  }).map(j=>({ type:'mifumo', label:(MIFUMO_TYPE_ICONS[j.jobType]||'')+' '+j.jobType, sub:j.location, cost:j.totalCost, d:j.completedAt||j.completedDate }));
+  return fromVehicles.concat(fromMifumo).sort((a,b)=> new Date(a.d) - new Date(b.d));
+}
+function renderUnpaidAfterMonthAlert(){
+  const stale = getUnpaidStaleItems();
   if(stale.length===0) return '';
+  const now = new Date();
   return `<div class="card blink-alert" style="margin-bottom:16px;border:2px solid var(--red);background:#FFF7F5;">
-    <div class="card-head" style="border:none;"><h3 style="color:var(--red);">💰 Alarm: Matengenezo Yamekamilika Zaidi ya Mwezi Bado Hayajalipiwa</h3></div>
+    <div class="card-head" style="border:none;"><h3 style="color:var(--red);">💰 Alarm: Kazi Zimekamilika Zaidi ya Siku ${UNPAID_ALERT_DAYS} Bado Hazijalipiwa (Magari na Mifumo)</h3></div>
     <div class="card-pad" style="padding-top:0;">
-      ${stale.map(v=>{ const d = v.completedAt||v.completedDate; const days = Math.floor((now-new Date(d))/(1000*60*60*24));
+      ${stale.map(x=>{ const days = Math.floor((now-new Date(x.d))/(1000*60*60*24));
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);">
-        <div><b>${esc(v.regNo)}</b> <span class="small">— ${esc(v.owner)} — TZS ${fmtMoney(v.totalCost)}</span></div>
-        <div class="small" style="font-weight:700;color:var(--red);">Yamekamilika siku ${days} zilizopita, bado hayajalipiwa</div>
+        <div><b>${esc(x.label)}</b> <span class="small">— ${esc(x.sub)} — TZS ${fmtMoney(x.cost)}</span></div>
+        <div class="small" style="font-weight:700;color:var(--red);">Siku ${days} zilizopita, bado halijalipiwa</div>
       </div>`; }).join('')}
     </div>
   </div>`;
+}
+/** POPUP halisi (dirisha linalojitokeza) - linaonekana MARA MOJA baada ya kuingia mfumo, endapo
+ *  kuna kazi zinazostahili onyo. Linaonekana MARA MOJA TU kwa kila kikao (session) ili lisisumbue
+ *  kila unapobofya ukurasa mwingine - tumia "Angalia Tena" kwenye Dashibodi kuliona tena wakati wowote. */
+let unpaidAlertShownThisSession = false;
+function maybeShowUnpaidAlertPopup(){
+  if(unpaidAlertShownThisSession) return;
+  const stale = getUnpaidStaleItems();
+  if(stale.length===0) return;
+  unpaidAlertShownThisSession = true;
+  const now = new Date();
+  openModal(`
+    <div class="modal-head"><h3 style="color:var(--red);">🚨 Onyo: Kazi Zisizolipiwa Zaidi ya Siku ${UNPAID_ALERT_DAYS}</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <p class="small" style="margin-bottom:10px;">Kazi zifuatazo (magari na mifumo) zimekamilika zaidi ya siku ${UNPAID_ALERT_DAYS} bila kulipiwa. Zifuatilie haraka.</p>
+      ${stale.map(x=>{ const days = Math.floor((now-new Date(x.d))/(1000*60*60*24));
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line);">
+        <div><b>${esc(x.label)}</b> <span class="small">— ${esc(x.sub)} — TZS ${fmtMoney(x.cost)}</span></div>
+        <div class="small" style="font-weight:700;color:var(--red);">Siku ${days}</div>
+      </div>`; }).join('')}
+    </div>
+    <div class="modal-foot"><button class="btn amber" onclick="closeModal()">Nimeelewa</button></div>
+  `);
 }
 
 /* ============================== VEHICLES ============================== */
@@ -1565,6 +1605,8 @@ function selectVehicleFromSearch(regId){
   const priorJobs = DB.vehicles.filter(v=>v.vehicleRegId===regId).slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
   const lastKm = priorJobs.length>0 ? priorJobs[0].currentKm : null;
   const lastJob = priorJobs.length>0 ? priorJobs[0] : null;
+  const OPEN_STATUSES = ['haijaanza','inasubiri_vipuri','inaendelea'];
+  const openJobs = priorJobs.filter(j=>OPEN_STATUSES.includes(j.status));
   const infoBox = document.getElementById('vExistingInfo');
   infoBox.style.display = 'block';
   infoBox.innerHTML = `
@@ -1577,6 +1619,14 @@ function selectVehicleFromSearch(regId){
       <div class="small">KM za Mwisho Kurekodiwa: <b>${lastKm!==null?Number(lastKm).toLocaleString()+' km':'Hazijulikani'}</b></div>
     </div>
     ${lastJob ? `<div class="small" style="margin-top:6px;">Kazi ya Mwisho Iliyosajiliwa: <b>${fmtDate(lastJob.createdAt.slice(0,10))}</b> — Aina: <span class="badge ${lastJob.unit==='matengenezo'?'blue':'amber'} dot">${lastJob.unit==='matengenezo'?'Matengenezo':'Ukaguzi'}</span> — Hali: <span class="badge ${STATUS_LABELS[lastJob.status].cls} dot">${STATUS_LABELS[lastJob.status].label}</span></div>` : ''}
+    ${openJobs.length>0 ? `
+    <div style="margin-top:10px;padding:10px;background:#FFF7E6;border:1px solid var(--amber);border-radius:8px;">
+      <div class="small" style="font-weight:700;color:#8A5A00;margin-bottom:6px;">⚠️ Gari hili lina kazi ${openJobs.length>1?'ZISIZO':'isiyo'}fungwa bado — fungua uendelee nazo badala ya kusajili mpya:</div>
+      ${openJobs.map(j=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;">
+        <span class="small">${j.unit==='matengenezo'?'🔧 Matengenezo':'🔍 Ukaguzi'} — <span class="badge ${STATUS_LABELS[j.status].cls} dot">${STATUS_LABELS[j.status].label}</span> — ${fmtDate(j.createdAt.slice(0,10))}</span>
+        <button class="btn amber sm" onclick="openVehicleDetail('${j.id}')">🔓 FUNGUA</button>
+      </div>`).join('')}
+    </div>` : ''}
     <div class="small" style="margin-top:6px;color:var(--slate);">Jaza tu sehemu mpya chini (Kilomita za Sasa, Kitengo, na tatizo la sasa) — taarifa nyingine hazihitaji kuandikwa upya.</div>
   `;
   if(lastKm!==null && lastKm!==undefined){ document.getElementById('f_km').value = lastKm; }
@@ -5233,6 +5283,166 @@ function printBoardingOff(id){
   printRawDocument(body);
 }
 
+/* ============================== TMSM 3: VEHICLE INSPECTION / MAINTENANCE REPORT ============================== */
+function inspectionLetterhead(){
+  return `
+  <div style="text-align:center;border-bottom:3px solid var(--navy);padding-bottom:12px;margin-bottom:16px;">
+    ${officialLogoRow()}
+    <div style="font-size:15px;font-weight:800;">THE UNITED REPUBLIC OF TANZANIA</div>
+    <div style="font-size:11.5px;font-weight:700;margin-top:2px;">MINISTRY OF WORKS</div>
+    <div style="font-size:12.5px;font-weight:700;margin-top:2px;">TANZANIA ELECTRICAL, MECHANICAL AND ELECTRONICS SERVICE AGENCY (TEMESA)</div>
+    <div style="font-size:11px;color:var(--slate);margin-top:6px;">TEMESA MWANZA, Igogo Street &nbsp;\u00b7&nbsp; S.L.P 691, MWANZA, TANZANIA &nbsp;\u00b7&nbsp; Simu: 0713631613</div>
+    <div style="font-size:11px;color:var(--slate);">Email: rm.mwanza@temesa.go.tz &nbsp;\u00b7&nbsp; Website: www.temesa.go.tz</div>
+    <div style="margin-top:10px;font-weight:800;font-size:15px;letter-spacing:.5px;">VEHICLE INSPECTION / MAINTENANCE REPORT</div>
+  </div>`;
+}
+function renderInspection(el){
+  const list = DB.inspectionForms.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  el.innerHTML = `
+  <div class="flex-between" style="margin-bottom:14px;">
+    <div class="small">Fomu za Ukaguzi zilizojazwa: ${list.length}</div>
+    <button class="btn amber" onclick="openInspectionForm()">\u2795 Jaza Fomu Mpya (TMSM 3)</button>
+  </div>
+  <div class="card">
+    <div class="table-wrap"><table><thead><tr><th>Ref. No</th><th>Vehicle/Plant No</th><th>Ministry/Dept</th><th>Tarehe</th><th></th></tr></thead>
+    <tbody>${list.map(f=>`<tr><td class="mono">${esc(f.refNo||'\u2014')}</td><td>${esc(f.vehicleNo)}</td><td>${esc(f.ministryDept||'\u2014')}</td><td>${fmtDate(f.date)}</td>
+      <td style="text-align:right;"><button class="btn ghost sm" onclick="printInspectionForm('${f.id}')">\ud83d\uddb6\ufe0f Chapisha</button> ${canEditNow()?`<button class="btn ghost sm" onclick="openInspectionForm('${f.id}')">\u270f\ufe0f Hariri</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('inspectionForms','${f.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="5" class="empty">Hakuna fomu bado</td></tr>`}</tbody></table></div>
+  </div>
+  `;
+}
+function openInspectionForm(id){
+  const f = id ? DB.inspectionForms.find(x=>x.id===id) : null;
+  openModal(`
+    <div class="modal-head"><h3>${f?'Hariri':'Jaza'} TMSM 3 \u2014 Vehicle Inspection / Maintenance Report</h3><button class="modal-x" onclick="closeModal()">\u2715</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="field"><label>Ref. No</label><input id="in_refNo" value="${f?esc(f.refNo||''):''}"></div>
+        <div class="field"><label>Tarehe *</label><input id="in_date" type="date" value="${f?f.date:todayISO()}"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Vehicle / Motor Cycle / Plant No *</label><input id="in_vehicleNo" value="${f?esc(f.vehicleNo||''):''}"></div>
+        <div class="field"><label>Km/Hrs</label><input id="in_kmHrs" value="${f?esc(f.kmHrs||''):''}"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Make</label><input id="in_make" value="${f?esc(f.make||''):''}"></div>
+        <div class="field"><label>Type</label><input id="in_type" value="${f?esc(f.type||''):''}"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Model</label><input id="in_model" value="${f?esc(f.model||''):''}"></div>
+        <div class="field"><label>Chassis/Frame No</label><input id="in_chassisNo" value="${f?esc(f.chassisNo||''):''}"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Engine No</label><input id="in_engineNo" value="${f?esc(f.engineNo||''):''}"></div>
+        <div class="field"><label>Work Location</label><input id="in_workLocation" value="${f?esc(f.workLocation||''):''}"></div>
+      </div>
+      <div class="field"><label>Ministry / Department</label><input id="in_ministryDept" value="${f?esc(f.ministryDept||''):''}"></div>
+
+      <div class="divider"></div>
+      <div class="field"><label>DESCRIPTION <span class="opt">\u2014 andika kila kipengele mstari mpya (1-15), vitanumbari kiotomatiki wakati wa kuchapisha</span></label>
+        <textarea id="in_description" rows="8" placeholder="mf.&#10;Angalia mafuta ya injini&#10;Kagua breki&#10;...">${f?esc((f.descriptions||[]).join(String.fromCharCode(10))):''}</textarea></div>
+
+      <div class="divider"></div>
+      <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">Inspected By</div>
+      <div class="form-row-3">
+        <div class="field"><label>Name</label><input id="in_inspectedByName" value="${f?esc(f.inspectedByName||''):''}"></div>
+        <div class="field"><label>Designation</label><input id="in_inspectedByDesig" value="${f?esc(f.inspectedByDesig||''):''}"></div>
+        <div class="field"><label>Tarehe</label><input id="in_inspectedByDate" type="date" value="${f?f.inspectedByDate||'':todayISO()}"></div>
+      </div>
+
+      <div class="small" style="font-weight:700;color:var(--navy);margin:12px 0 8px;">(I) Head of Section</div>
+      <div class="form-row-3">
+        <div class="field"><label>Name</label><input id="in_headOfSectionName" value="${f?esc(f.headOfSectionName||''):''}"></div>
+        <div class="field"><label>Designation</label><input id="in_headOfSectionDesig" value="${f?esc(f.headOfSectionDesig||''):''}"></div>
+        <div class="field"><label>Tarehe</label><input id="in_headOfSectionDate" type="date" value="${f?f.headOfSectionDate||'':''}"></div>
+      </div>
+
+      <div class="small" style="font-weight:700;color:var(--navy);margin:12px 0 8px;">(II) Owner Remarks</div>
+      <div class="field"><label>Maelezo ya Mmiliki</label><textarea id="in_ownerRemarks" rows="2">${f?esc(f.ownerRemarks||''):''}</textarea></div>
+      <div class="form-row-3">
+        <div class="field"><label>Name</label><input id="in_ownerName" value="${f?esc(f.ownerName||''):''}"></div>
+        <div class="field"><label>Designation</label><input id="in_ownerDesig" value="${f?esc(f.ownerDesig||''):''}"></div>
+        <div class="field"><label>Tarehe</label><input id="in_ownerDate" type="date" value="${f?f.ownerDate||'':''}"></div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Ghairi</button><button class="btn amber" onclick="saveInspectionForm('${id||''}')">Hifadhi</button></div>
+  `);
+}
+function saveInspectionForm(id){
+  const vehicleNo = document.getElementById('in_vehicleNo').value.trim();
+  const date = document.getElementById('in_date').value;
+  if(!vehicleNo){ toast("Andika Vehicle/Motor Cycle/Plant No","red"); return; }
+  if(!date){ toast("Weka tarehe","red"); return; }
+  const g = fid => document.getElementById(fid).value.trim();
+  const descriptions = document.getElementById('in_description').value.split(String.fromCharCode(10)).map(s=>s.trim()).filter(s=>s).slice(0,15);
+  const data = {
+    refNo:g('in_refNo'), date, vehicleNo, kmHrs:g('in_kmHrs'), make:g('in_make'), type:g('in_type'), model:g('in_model'),
+    chassisNo:g('in_chassisNo'), engineNo:g('in_engineNo'), workLocation:g('in_workLocation'), ministryDept:g('in_ministryDept'),
+    descriptions,
+    inspectedByName:g('in_inspectedByName'), inspectedByDesig:g('in_inspectedByDesig'), inspectedByDate:g('in_inspectedByDate'),
+    headOfSectionName:g('in_headOfSectionName'), headOfSectionDesig:g('in_headOfSectionDesig'), headOfSectionDate:g('in_headOfSectionDate'),
+    ownerRemarks:g('in_ownerRemarks'), ownerName:g('in_ownerName'), ownerDesig:g('in_ownerDesig'), ownerDate:g('in_ownerDate')
+  };
+  if(id){
+    const existing = DB.inspectionForms.find(x=>x.id===id);
+    if(existing) Object.assign(existing, data);
+  } else {
+    DB.inspectionForms.push(Object.assign({id:uid('insp'), createdAt:nowTime()}, data));
+  }
+  saveDB(); closeModal(); toast(id?"Fomu imesasishwa":"Fomu ya Ukaguzi imehifadhiwa","green");
+  renderInspection(document.getElementById('view_inspection'));
+}
+function printInspectionForm(id){
+  const f = DB.inspectionForms.find(x=>x.id===id);
+  if(!f) return;
+  const descRows = [];
+  for(let i=0;i<15;i++){
+    descRows.push(`<tr><td style="width:6%;padding:5px 8px;text-align:center;">${i+1}.</td><td style="padding:5px 8px;">${esc(f.descriptions[i]||'')}</td></tr>`);
+  }
+  const body = `
+    ${inspectionLetterhead()}
+    <table style="font-size:12.5px;width:100%;">
+      <tr><td style="width:60%;padding:4px 8px;">Ref. No: <b>${esc(f.refNo||'\u2014')}</b></td><td style="padding:4px 8px;">Date: <b>${fmtDate(f.date)}</b></td></tr>
+      <tr><td style="padding:4px 8px;">Vehicle / Motor Cycle / Plant No: <b>${esc(f.vehicleNo)}</b></td><td style="padding:4px 8px;">Km/Hrs: <b>${esc(f.kmHrs||'\u2014')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Make: <b>${esc(f.make||'\u2014')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Type: <b>${esc(f.type||'\u2014')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Model: <b>${esc(f.model||'\u2014')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Chassis/Frame No: <b>${esc(f.chassisNo||'\u2014')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Engine No: <b>${esc(f.engineNo||'\u2014')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Work Location: <b>${esc(f.workLocation||'\u2014')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Ministry / Department: <b>${esc(f.ministryDept||'\u2014')}</b></td></tr>
+    </table>
+    <table style="font-size:12px;width:100%;border:1px solid #ccc;margin-top:10px;">
+      <tr><td style="width:6%;padding:5px 8px;font-weight:700;background:#F0F3F6;">S/NO.</td><td style="padding:5px 8px;font-weight:700;background:#F0F3F6;">DESCRIPTION</td></tr>
+      ${descRows.join('')}
+    </table>
+    <div style="margin-top:16px;font-size:11.5px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:nowrap;">
+      <span style="flex:1;min-width:0;">Inspected By: <b>${esc(f.inspectedByName||'\u2014')}</b></span>
+      <span style="flex:1;min-width:0;">Designation: <b>${esc(f.inspectedByDesig||'\u2014')}</b></span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ______________</span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Date: ${fmtDate(f.inspectedByDate)}</span>
+    </div>
+    <div style="margin-top:10px;font-size:11.5px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:nowrap;">
+      <span style="flex:0 0 auto;white-space:nowrap;">(I) Head of Section:</span>
+      <span style="flex:1;min-width:0;">Name: <b>${esc(f.headOfSectionName||'\u2014')}</b></span>
+      <span style="flex:1;min-width:0;">Designation: <b>${esc(f.headOfSectionDesig||'\u2014')}</b></span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ______________</span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Date: ${fmtDate(f.headOfSectionDate)}</span>
+    </div>
+    <div style="margin-top:12px;font-size:12px;">(II) Owner Remarks: ${esc(f.ownerRemarks||'\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026')}</div>
+    <div style="margin-top:10px;font-size:11.5px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:nowrap;">
+      <span style="flex:1;min-width:0;">Name: <b>${esc(f.ownerName||'\u2014')}</b></span>
+      <span style="flex:1;min-width:0;">Designation: <b>${esc(f.ownerDesig||'\u2014')}</b></span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ______________</span>
+      <span style="flex:0 0 auto;white-space:nowrap;">Date: ${fmtDate(f.ownerDate)}</span>
+    </div>
+    <div style="margin-top:20px;text-align:center;font-size:11px;color:var(--slate);border-top:1px solid var(--line);padding-top:8px;">
+      "TEMESA" Igogo Street, S.L.P 691, Mwanza &nbsp;\u00b7&nbsp; Tel: 0713631613 &nbsp;\u00b7&nbsp; Email: rm.mwanza@temesa.go.tz &nbsp;\u00b7&nbsp; www.temesa.go.tz
+    </div>
+  `;
+  printRawDocument(body);
+}
+
+
 
 const TT_THEORY_MAX = [10,20,10,10];
 const TT_THEORY_LABELS = ["Punctuality in understanding / asking questions","Correctness of Answers (Relevant)","Awareness of Vehicles and Road Signs","Experience in Driving Public Vehicles / Plant"];
@@ -5798,6 +6008,7 @@ function startApp(){
     updateSyncBadge();
     checkForDataRecovery();
     maybeShowDailyEmailReminder();
+    setTimeout(maybeShowUnpaidAlertPopup, 900); // subiri kidogo hesabu za Dashibodi zikamilike kwanza
   })();
 }
 
