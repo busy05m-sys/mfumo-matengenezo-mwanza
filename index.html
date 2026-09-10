@@ -5291,8 +5291,8 @@ function inspectionLetterhead(){
     <div style="font-size:15px;font-weight:800;">THE UNITED REPUBLIC OF TANZANIA</div>
     <div style="font-size:11.5px;font-weight:700;margin-top:2px;">MINISTRY OF WORKS</div>
     <div style="font-size:12.5px;font-weight:700;margin-top:2px;">TANZANIA ELECTRICAL, MECHANICAL AND ELECTRONICS SERVICE AGENCY (TEMESA)</div>
-    <div style="font-size:11px;color:var(--slate);margin-top:6px;">TEMESA MWANZA, Igogo Street &nbsp;\u00b7&nbsp; S.L.P 691, MWANZA, TANZANIA &nbsp;\u00b7&nbsp; Simu: 0713631613</div>
-    <div style="font-size:11px;color:var(--slate);">Email: rm.mwanza@temesa.go.tz &nbsp;\u00b7&nbsp; Website: www.temesa.go.tz</div>
+    <div style="font-size:11px;color:var(--slate);margin-top:6px;">TEMESA MWANZA, Igogo Street &nbsp;·&nbsp; S.L.P 691, MWANZA, TANZANIA &nbsp;·&nbsp; Simu: 0713631613</div>
+    <div style="font-size:11px;color:var(--slate);">Email: rm.mwanza@temesa.go.tz &nbsp;·&nbsp; Website: www.temesa.go.tz</div>
     <div style="margin-top:10px;font-weight:800;font-size:15px;letter-spacing:.5px;">VEHICLE INSPECTION / MAINTENANCE REPORT</div>
   </div>`;
 }
@@ -5301,19 +5301,19 @@ function renderInspection(el){
   el.innerHTML = `
   <div class="flex-between" style="margin-bottom:14px;">
     <div class="small">Fomu za Ukaguzi zilizojazwa: ${list.length}</div>
-    <button class="btn amber" onclick="openInspectionForm()">\u2795 Jaza Fomu Mpya (TMSM 3)</button>
+    <button class="btn amber" onclick="openInspectionForm()">➕ Jaza Fomu Mpya (TMSM 3)</button>
   </div>
   <div class="card">
     <div class="table-wrap"><table><thead><tr><th>Ref. No</th><th>Vehicle/Plant No</th><th>Ministry/Dept</th><th>Tarehe</th><th></th></tr></thead>
-    <tbody>${list.map(f=>`<tr><td class="mono">${esc(f.refNo||'\u2014')}</td><td>${esc(f.vehicleNo)}</td><td>${esc(f.ministryDept||'\u2014')}</td><td>${fmtDate(f.date)}</td>
-      <td style="text-align:right;"><button class="btn ghost sm" onclick="printInspectionForm('${f.id}')">\ud83d\uddb6\ufe0f Chapisha</button> ${canEditNow()?`<button class="btn ghost sm" onclick="openInspectionForm('${f.id}')">\u270f\ufe0f Hariri</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('inspectionForms','${f.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="5" class="empty">Hakuna fomu bado</td></tr>`}</tbody></table></div>
+    <tbody>${list.map(f=>`<tr><td class="mono">${esc(f.refNo||'—')}</td><td>${esc(f.vehicleNo)}</td><td>${esc(f.ministryDept||'—')}</td><td>${fmtDate(f.date)}</td>
+      <td style="text-align:right;"><button class="btn ghost sm" onclick="printInspectionForm('${f.id}')">🖨️ Chapisha</button> ${canEditNow()?`<button class="btn ghost sm" onclick="openInspectionForm('${f.id}')">✏️ Hariri</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteRecord('inspectionForms','${f.id}')">Futa</button>`:''}</td></tr>`).join('') || `<tr><td colspan="5" class="empty">Hakuna fomu bado</td></tr>`}</tbody></table></div>
   </div>
   `;
 }
 function openInspectionForm(id){
   const f = id ? DB.inspectionForms.find(x=>x.id===id) : null;
   openModal(`
-    <div class="modal-head"><h3>${f?'Hariri':'Jaza'} TMSM 3 \u2014 Vehicle Inspection / Maintenance Report</h3><button class="modal-x" onclick="closeModal()">\u2715</button></div>
+    <div class="modal-head"><h3>${f?'Hariri':'Jaza'} TMSM 3 — Vehicle Inspection / Maintenance Report</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
       <div class="form-row">
         <div class="field"><label>Ref. No</label><input id="in_refNo" value="${f?esc(f.refNo||''):''}"></div>
@@ -5338,8 +5338,11 @@ function openInspectionForm(id){
       <div class="field"><label>Ministry / Department</label><input id="in_ministryDept" value="${f?esc(f.ministryDept||''):''}"></div>
 
       <div class="divider"></div>
-      <div class="field"><label>DESCRIPTION <span class="opt">\u2014 andika kila kipengele mstari mpya (1-15), vitanumbari kiotomatiki wakati wa kuchapisha</span></label>
-        <textarea id="in_description" rows="8" placeholder="mf.&#10;Angalia mafuta ya injini&#10;Kagua breki&#10;...">${f?esc((f.descriptions||[]).join(String.fromCharCode(10))):''}</textarea></div>
+      <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">DESCRIPTION <span class="opt" style="font-weight:400;">— jaza kila namba peke yake (acha wazi zisizohitajika)</span></div>
+      ${Array.from({length:15}).map((_,i)=>`<div class="field" style="display:flex;flex-direction:row;align-items:center;gap:8px;margin-bottom:6px;">
+        <span style="width:22px;flex-shrink:0;font-weight:700;color:var(--navy);text-align:right;">${i+1}.</span>
+        <input id="in_desc${i}" style="flex:1;" value="${f&&f.descriptions&&f.descriptions[i]?esc(f.descriptions[i]):''}">
+      </div>`).join('')}
 
       <div class="divider"></div>
       <div class="small" style="font-weight:700;color:var(--navy);margin-bottom:8px;">Inspected By</div>
@@ -5373,7 +5376,7 @@ function saveInspectionForm(id){
   if(!vehicleNo){ toast("Andika Vehicle/Motor Cycle/Plant No","red"); return; }
   if(!date){ toast("Weka tarehe","red"); return; }
   const g = fid => document.getElementById(fid).value.trim();
-  const descriptions = document.getElementById('in_description').value.split(String.fromCharCode(10)).map(s=>s.trim()).filter(s=>s).slice(0,15);
+  const descriptions = Array.from({length:15}).map((_,i)=> document.getElementById('in_desc'+i).value.trim());
   const data = {
     refNo:g('in_refNo'), date, vehicleNo, kmHrs:g('in_kmHrs'), make:g('in_make'), type:g('in_type'), model:g('in_model'),
     chassisNo:g('in_chassisNo'), engineNo:g('in_engineNo'), workLocation:g('in_workLocation'), ministryDept:g('in_ministryDept'),
@@ -5401,42 +5404,42 @@ function printInspectionForm(id){
   const body = `
     ${inspectionLetterhead()}
     <table style="font-size:12.5px;width:100%;">
-      <tr><td style="width:60%;padding:4px 8px;">Ref. No: <b>${esc(f.refNo||'\u2014')}</b></td><td style="padding:4px 8px;">Date: <b>${fmtDate(f.date)}</b></td></tr>
-      <tr><td style="padding:4px 8px;">Vehicle / Motor Cycle / Plant No: <b>${esc(f.vehicleNo)}</b></td><td style="padding:4px 8px;">Km/Hrs: <b>${esc(f.kmHrs||'\u2014')}</b></td></tr>
-      <tr><td style="padding:4px 8px;" colspan="2">Make: <b>${esc(f.make||'\u2014')}</b></td></tr>
-      <tr><td style="padding:4px 8px;" colspan="2">Type: <b>${esc(f.type||'\u2014')}</b></td></tr>
-      <tr><td style="padding:4px 8px;" colspan="2">Model: <b>${esc(f.model||'\u2014')}</b></td></tr>
-      <tr><td style="padding:4px 8px;" colspan="2">Chassis/Frame No: <b>${esc(f.chassisNo||'\u2014')}</b></td></tr>
-      <tr><td style="padding:4px 8px;" colspan="2">Engine No: <b>${esc(f.engineNo||'\u2014')}</b></td></tr>
-      <tr><td style="padding:4px 8px;" colspan="2">Work Location: <b>${esc(f.workLocation||'\u2014')}</b></td></tr>
-      <tr><td style="padding:4px 8px;" colspan="2">Ministry / Department: <b>${esc(f.ministryDept||'\u2014')}</b></td></tr>
+      <tr><td style="width:60%;padding:4px 8px;">Ref. No: <b>${esc(f.refNo||'—')}</b></td><td style="padding:4px 8px;">Date: <b>${fmtDate(f.date)}</b></td></tr>
+      <tr><td style="padding:4px 8px;">Vehicle / Motor Cycle / Plant No: <b>${esc(f.vehicleNo)}</b></td><td style="padding:4px 8px;">Km/Hrs: <b>${esc(f.kmHrs||'—')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Make: <b>${esc(f.make||'—')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Type: <b>${esc(f.type||'—')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Model: <b>${esc(f.model||'—')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Chassis/Frame No: <b>${esc(f.chassisNo||'—')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Engine No: <b>${esc(f.engineNo||'—')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Work Location: <b>${esc(f.workLocation||'—')}</b></td></tr>
+      <tr><td style="padding:4px 8px;" colspan="2">Ministry / Department: <b>${esc(f.ministryDept||'—')}</b></td></tr>
     </table>
     <table style="font-size:12px;width:100%;border:1px solid #ccc;margin-top:10px;">
       <tr><td style="width:6%;padding:5px 8px;font-weight:700;background:#F0F3F6;">S/NO.</td><td style="padding:5px 8px;font-weight:700;background:#F0F3F6;">DESCRIPTION</td></tr>
       ${descRows.join('')}
     </table>
     <div style="margin-top:16px;font-size:11.5px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:nowrap;">
-      <span style="flex:1;min-width:0;">Inspected By: <b>${esc(f.inspectedByName||'\u2014')}</b></span>
-      <span style="flex:1;min-width:0;">Designation: <b>${esc(f.inspectedByDesig||'\u2014')}</b></span>
+      <span style="flex:1;min-width:0;">Inspected By: <b>${esc(f.inspectedByName||'—')}</b></span>
+      <span style="flex:1;min-width:0;">Designation: <b>${esc(f.inspectedByDesig||'—')}</b></span>
       <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ______________</span>
       <span style="flex:0 0 auto;white-space:nowrap;">Date: ${fmtDate(f.inspectedByDate)}</span>
     </div>
     <div style="margin-top:10px;font-size:11.5px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:nowrap;">
       <span style="flex:0 0 auto;white-space:nowrap;">(I) Head of Section:</span>
-      <span style="flex:1;min-width:0;">Name: <b>${esc(f.headOfSectionName||'\u2014')}</b></span>
-      <span style="flex:1;min-width:0;">Designation: <b>${esc(f.headOfSectionDesig||'\u2014')}</b></span>
+      <span style="flex:1;min-width:0;">Name: <b>${esc(f.headOfSectionName||'—')}</b></span>
+      <span style="flex:1;min-width:0;">Designation: <b>${esc(f.headOfSectionDesig||'—')}</b></span>
       <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ______________</span>
       <span style="flex:0 0 auto;white-space:nowrap;">Date: ${fmtDate(f.headOfSectionDate)}</span>
     </div>
-    <div style="margin-top:12px;font-size:12px;">(II) Owner Remarks: ${esc(f.ownerRemarks||'\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026\u2026')}</div>
+    <div style="margin-top:12px;font-size:12px;">(II) Owner Remarks: ${esc(f.ownerRemarks||'…………………………………………………………………')}</div>
     <div style="margin-top:10px;font-size:11.5px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:nowrap;">
-      <span style="flex:1;min-width:0;">Name: <b>${esc(f.ownerName||'\u2014')}</b></span>
-      <span style="flex:1;min-width:0;">Designation: <b>${esc(f.ownerDesig||'\u2014')}</b></span>
+      <span style="flex:1;min-width:0;">Name: <b>${esc(f.ownerName||'—')}</b></span>
+      <span style="flex:1;min-width:0;">Designation: <b>${esc(f.ownerDesig||'—')}</b></span>
       <span style="flex:0 0 auto;white-space:nowrap;">Sahihi: ______________</span>
       <span style="flex:0 0 auto;white-space:nowrap;">Date: ${fmtDate(f.ownerDate)}</span>
     </div>
     <div style="margin-top:20px;text-align:center;font-size:11px;color:var(--slate);border-top:1px solid var(--line);padding-top:8px;">
-      "TEMESA" Igogo Street, S.L.P 691, Mwanza &nbsp;\u00b7&nbsp; Tel: 0713631613 &nbsp;\u00b7&nbsp; Email: rm.mwanza@temesa.go.tz &nbsp;\u00b7&nbsp; www.temesa.go.tz
+      "TEMESA" Igogo Street, S.L.P 691, Mwanza &nbsp;·&nbsp; Tel: 0713631613 &nbsp;·&nbsp; Email: rm.mwanza@temesa.go.tz &nbsp;·&nbsp; www.temesa.go.tz
     </div>
   `;
   printRawDocument(body);
