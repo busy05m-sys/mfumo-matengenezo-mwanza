@@ -5371,7 +5371,7 @@ function openInspectionForm(id){
 }
 let inspDescCount = 0;
 function addInspectionDescLine(prefillValue){
-  if(inspDescCount>=15) return null;
+  if(inspDescCount>=100) return null;
   inspDescCount++;
   const i = inspDescCount;
   const list = document.getElementById('in_desc_list');
@@ -5385,10 +5385,10 @@ function addInspectionDescLine(prefillValue){
   inp.addEventListener('keydown', e=>{
     if(e.key==='Enter'){
       e.preventDefault();
-      if(inspDescCount<15){ addInspectionDescLine(); document.getElementById('in_desc'+inspDescCount).focus(); }
+      if(inspDescCount<100){ addInspectionDescLine(); document.getElementById('in_desc'+inspDescCount).focus(); }
     }
   });
-  if(inspDescCount>=15){ const btn=document.getElementById('in_desc_addBtn'); if(btn) btn.style.display='none'; }
+  if(inspDescCount>=100){ const btn=document.getElementById('in_desc_addBtn'); if(btn) btn.style.display='none'; }
   return inp;
 }
 /** Inaanzisha upya orodha ya DESCRIPTION - ikiwa kuna taarifa za awali (kuhariri), zinajazwa zote
@@ -5400,7 +5400,7 @@ function resetInspectionDescList(existing){
   const btn = document.getElementById('in_desc_addBtn'); if(btn) btn.style.display='';
   if(existing && existing.filter(Boolean).length){
     existing.forEach(v=>{ if(v) addInspectionDescLine(v); });
-    if(inspDescCount<15) addInspectionDescLine('');
+    if(inspDescCount<100) addInspectionDescLine('');
   } else {
     addInspectionDescLine('');
   }
@@ -5434,7 +5434,9 @@ function printInspectionForm(id){
   const f = DB.inspectionForms.find(x=>x.id===id);
   if(!f) return;
   const descRows = [];
-  for(let i=0;i<15;i++){
+  const total = Math.max(15, (f.descriptions||[]).length); // angalau mistari 15 (kama fomu asili) hata kama chache zimejazwa
+  for(let i=0;i<total;i++){
+    if(i>=15 && !f.descriptions[i]) continue; // baada ya 15, chapisha tu zilizojazwa
     descRows.push(`<tr><td style="width:6%;padding:5px 8px;text-align:center;">${i+1}.</td><td style="padding:5px 8px;">${esc(f.descriptions[i]||'')}</td></tr>`);
   }
   const body = `
