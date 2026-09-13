@@ -163,6 +163,52 @@ table tr:hover td{background:#F9FBFD;}
 
 .chip-row{display:flex;flex-wrap:wrap;gap:8px;}
 .divider{height:1px;background:var(--line);margin:16px 0;}
+
+/* ============================================================
+   RESPONSIVE — inafanya mfumo mzima utumike vizuri kwenye SIMU,
+   TABLET (iPad), LAPTOP/DESKTOP, na TV, bila kubadilisha kazi
+   yoyote iliyopo - ni "mpangilio" tu unaobadilika kulingana na
+   ukubwa wa skrini.
+============================================================ */
+#hamburgerBtn{display:none;background:none;border:none;color:#fff;font-size:22px;line-height:1;padding:4px 8px;border-radius:8px;cursor:pointer;}
+#hamburgerBtn:hover{background:rgba(255,255,255,.08);}
+#sidebarOverlay{display:none;position:fixed;inset:0;background:rgba(8,36,56,.55);z-index:39;}
+#sidebarOverlay.active{display:block;}
+
+@media(max-width:980px){
+  #hamburgerBtn{display:inline-block;color:var(--ink);}
+  #app{position:relative;}
+  #sidebar{
+    position:fixed; left:0; top:0; height:100vh; z-index:40;
+    transform:translateX(-102%); transition:transform .22s ease; width:280px; max-width:82vw;
+  }
+  #sidebar.open{transform:translateX(0);}
+  #main{width:100%;}
+  #topbar{padding:12px 14px;}
+  #content{padding:14px 14px 50px;}
+  .form-row,.form-row-3{grid-template-columns:1fr;}
+  .grid-4,.grid-3{grid-template-columns:repeat(2,1fr);}
+}
+@media(max-width:560px){
+  .grid-4,.grid-3,.grid-2{grid-template-columns:1fr;}
+  #topbar .page-title{font-size:16.5px;}
+  #topbar .page-desc{font-size:11px;}
+  .modal-bg{padding:0;align-items:stretch;}
+  .modal{max-width:100%;width:100%;min-height:100vh;border-radius:0;display:flex;flex-direction:column;}
+  .modal-body{max-height:none;flex:1;}
+  .topbar-actions{flex-wrap:wrap;justify-content:flex-end;gap:6px;}
+  table{font-size:12px;}
+  .btn,button{font-size:13px;}
+}
+@media(min-width:1600px){
+  /* Skrini kubwa (TV/monitor kubwa) - zuia maudhui kunyooka mno pembeni */
+  #content{max-width:1700px;margin:0 auto;width:100%;}
+}
+/* Vidole - hakikisha vitufe/viungo vinatosha kubofya kwa kidole kwenye simu */
+@media(pointer:coarse){
+  .btn,button,.navitem,select,input,textarea{min-height:38px;}
+  .navitem{padding:12px 12px;}
+}
 .small{font-size:11.5px;color:var(--slate);}
 a.linklike{color:var(--navy-2);font-weight:700;cursor:pointer;}
 .flex-between{display:flex;align-items:center;justify-content:space-between;}
@@ -211,12 +257,16 @@ a.linklike{color:var(--navy-2);font-weight:700;cursor:pointer;}
 <body>
 <div id="authScreen"><div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#5B6B79;font-size:15px;">☁️ Inaunganisha na database ya mtandaoni...</div></div>
 <div id="app" style="display:none;">
+  <div id="sidebarOverlay" onclick="closeMobileSidebar()"></div>
   <aside id="sidebar"></aside>
   <div id="main">
     <div id="topbar">
-      <div>
-        <div class="page-title" id="pageTitle">Dashibodi</div>
-        <div class="page-desc" id="pageDesc">Muhtasari wa shughuli za leo</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button id="hamburgerBtn" onclick="toggleMobileSidebar()" aria-label="Menu">☰</button>
+        <div>
+          <div class="page-title" id="pageTitle">Dashibodi</div>
+          <div class="page-desc" id="pageDesc">Muhtasari wa shughuli za leo</div>
+        </div>
       </div>
       <div class="topbar-actions" id="topbarActions"></div>
     </div>
@@ -1091,6 +1141,16 @@ function go(view){
   document.getElementById('pageTitle').textContent = PAGE_META[view][0];
   document.getElementById('pageDesc').textContent = PAGE_META[view][1];
   render();
+  closeMobileSidebar(); // kwenye simu, funga menu baada ya kuchagua ukurasa - kuona maudhui mara moja
+}
+/** Menu ya kushoto (sidebar) kwenye simu/tablet ndogo - inafunguka juu ya maudhui (haiondoi nafasi). */
+function toggleMobileSidebar(){
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarOverlay').classList.toggle('active');
+}
+function closeMobileSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('active');
 }
 
 function buildSidebar(){
