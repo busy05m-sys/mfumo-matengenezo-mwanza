@@ -953,6 +953,8 @@ const STATUS_LABELS = {
   haijaanza: {label:"Haijaanza", cls:"gray"},
   inaendelea: {label:"Inaendelea", cls:"blue"},
   inasubiri_vipuri: {label:"Inasubiri Vipuri", cls:"amber"},
+  inasubiri_kibali: {label:"Inasubiri Approval kutoka kwa Mteja", cls:"amber"},
+  kibali_kimepatikana: {label:"Imepewa Kibali", cls:"blue"},
   imekamilika: {label:"Imekamilika", cls:"green"}
 };
 const UNIT_LABELS = { ukaguzi:"Ukaguzi (Inspections)", matengenezo:"Matengenezo" };
@@ -4414,6 +4416,8 @@ function buildReportBody(type, range){
     const kamili = vs.filter(v=>v.status==='imekamilika');
     const inaendelea = vs.filter(v=>v.status==='inaendelea');
     const vipuri = vs.filter(v=>v.status==='inasubiri_vipuri');
+    const kibaliMteja = vs.filter(v=>v.status==='inasubiri_kibali');
+    const kibaliPatikana = vs.filter(v=>v.status==='kibali_kimepatikana');
     const hazijaanza = vs.filter(v=>v.status==='haijaanza');
     const hazijalipiwa = kamili.filter(v=>!v.paid);
     const section = (title, list, color)=> `
@@ -4425,6 +4429,8 @@ function buildReportBody(type, range){
     body += section('✅ Yaliyokamilika', kamili, '--green');
     body += section('🔧 Yanayoendelea', inaendelea, '--navy-2');
     body += section('⏳ Yanayosubiri Vipuri/Vifaa', vipuri, '--amber');
+    body += section('🕓 Yanayosubiri Approval kutoka kwa Mteja', kibaliMteja, '--amber');
+    body += section('👍 Yamepewa Kibali', kibaliPatikana, '--navy-2');
     body += section('⬜ Hayajaanza', hazijaanza, '--slate');
     body += section('💰 Yaliyokamilika Ila Hayajalipiwa', hazijalipiwa, '--red');
   }
