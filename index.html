@@ -1407,8 +1407,8 @@ function renderAppointmentReminders(){
   return `<div class="card blink-alert" style="margin-bottom:16px;border:2px solid var(--red);background:#FFF7F5;">
     <div class="card-head" style="border:none;"><h3 style="color:var(--red);">🔔 Ukumbusho: Vikao na Ratiba za Karibuni</h3></div>
     <div class="card-pad" style="padding-top:0;">
-      ${soon.map(a=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);">
-        <div><b>${esc(a.title)}</b> <span class="small">— ${esc(a.location||'')}</span></div>
+      ${soon.map(a=>`<div onclick="currentView='appointments';render();setTimeout(()=>openAppointmentForm('${a.id}'),50);" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);" onmouseover="this.style.background='#FFEDEA'" onmouseout="this.style.background='transparent'">
+        <div><b style="text-decoration:underline;">${esc(a.title)}</b> <span class="small">— ${esc(a.location||'')}</span></div>
         <div class="small" style="font-weight:700;">${esc(a.date)} ${esc(a.time||'')}</div>
       </div>`).join('')}
     </div>
@@ -1429,8 +1429,8 @@ function renderInspectedNotRepairedAlert(){
     <div class="card-head" style="border:none;"><h3 style="color:#8A5A00;">⚠️ Alarm: Magari Yaliyokaguliwa Zaidi ya Mwezi Bila Matengenezo</h3></div>
     <div class="card-pad" style="padding-top:0;">
       ${stale.map(v=>{ const d = v.completedAt||v.completedDate; const days = Math.floor((now-new Date(d))/(1000*60*60*24));
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);">
-        <div><b>${esc(v.regNo)}</b> <span class="small">— ${esc(v.owner)}</span></div>
+        return `<div onclick="currentView='vehicles';render();setTimeout(()=>openVehicleDetail('${v.id}'),50);" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);" onmouseover="this.style.background='#FEEBC8'" onmouseout="this.style.background='transparent'">
+        <div><b style="text-decoration:underline;">${esc(v.regNo)}</b> <span class="small">— ${esc(v.owner)}</span></div>
         <div class="small" style="font-weight:700;color:#8A5A00;">Ukaguzi ulikamilika siku ${days} zilizopita</div>
       </div>`; }).join('')}
     </div>
@@ -1447,14 +1447,19 @@ function getUnpaidStaleItems(){
     const d = v.completedAt ? new Date(v.completedAt) : (v.completedDate ? new Date(v.completedDate) : null);
     if(!d) return false;
     return (now - d) / (1000*60*60*24) >= UNPAID_ALERT_DAYS;
-  }).map(v=>({ type:'gari', label:v.regNo, sub:v.owner, cost:v.totalCost, d:v.completedAt||v.completedDate }));
+  }).map(v=>({ type:'gari', id:v.id, label:v.regNo, sub:v.owner, cost:v.totalCost, d:v.completedAt||v.completedDate }));
   const fromMifumo = DB.mifumoJobs.filter(j=>{
     if(j.status!=='imekamilika' || j.paid) return false;
     const d = j.completedAt ? new Date(j.completedAt) : (j.completedDate ? new Date(j.completedDate) : null);
     if(!d) return false;
     return (now - d) / (1000*60*60*24) >= UNPAID_ALERT_DAYS;
-  }).map(j=>({ type:'mifumo', label:(MIFUMO_TYPE_ICONS[j.jobType]||'')+' '+j.jobType, sub:j.location, cost:j.totalCost, d:j.completedAt||j.completedDate }));
+  }).map(j=>({ type:'mifumo', id:j.id, label:(MIFUMO_TYPE_ICONS[j.jobType]||'')+' '+j.jobType, sub:j.location, cost:j.totalCost, d:j.completedAt||j.completedDate }));
   return fromVehicles.concat(fromMifumo).sort((a,b)=> new Date(a.d) - new Date(b.d));
+}
+function openUnpaidStaleItem(type, id){
+  closeModal();
+  if(type==='gari'){ currentView='vehicles'; render(); setTimeout(()=>openVehicleDetail(id),50); }
+  else { currentView='mifumo'; render(); setTimeout(()=>openMifumoDetail(id),50); }
 }
 function renderUnpaidAfterMonthAlert(){
   const stale = getUnpaidStaleItems();
@@ -1464,8 +1469,8 @@ function renderUnpaidAfterMonthAlert(){
     <div class="card-head" style="border:none;"><h3 style="color:var(--red);">💰 Alarm: Kazi Zimekamilika Zaidi ya Siku ${UNPAID_ALERT_DAYS} Bado Hazijalipiwa (Magari na Mifumo)</h3></div>
     <div class="card-pad" style="padding-top:0;">
       ${stale.map(x=>{ const days = Math.floor((now-new Date(x.d))/(1000*60*60*24));
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);">
-        <div><b>${esc(x.label)}</b> <span class="small">— ${esc(x.sub)} — TZS ${fmtMoney(x.cost)}</span></div>
+        return `<div onclick="openUnpaidStaleItem('${x.type}','${x.id}')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);" onmouseover="this.style.background='#FFEDEA'" onmouseout="this.style.background='transparent'">
+        <div><b style="text-decoration:underline;">${esc(x.label)}</b> <span class="small">— ${esc(x.sub)} — TZS ${fmtMoney(x.cost)}</span></div>
         <div class="small" style="font-weight:700;color:var(--red);">Siku ${days} zilizopita, bado halijalipiwa</div>
       </div>`; }).join('')}
     </div>
@@ -1486,8 +1491,8 @@ function maybeShowUnpaidAlertPopup(){
     <div class="modal-body">
       <p class="small" style="margin-bottom:10px;">Kazi zifuatazo (magari na mifumo) zimekamilika zaidi ya siku ${UNPAID_ALERT_DAYS} bila kulipiwa. Zifuatilie haraka.</p>
       ${stale.map(x=>{ const days = Math.floor((now-new Date(x.d))/(1000*60*60*24));
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line);">
-        <div><b>${esc(x.label)}</b> <span class="small">— ${esc(x.sub)} — TZS ${fmtMoney(x.cost)}</span></div>
+        return `<div onclick="openUnpaidStaleItem('${x.type}','${x.id}')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line);" onmouseover="this.style.background='#FFEDEA'" onmouseout="this.style.background='transparent'">
+        <div><b style="text-decoration:underline;">${esc(x.label)}</b> <span class="small">— ${esc(x.sub)} — TZS ${fmtMoney(x.cost)}</span></div>
         <div class="small" style="font-weight:700;color:var(--red);">Siku ${days}</div>
       </div>`; }).join('')}
     </div>
