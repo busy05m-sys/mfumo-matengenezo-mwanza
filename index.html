@@ -4229,7 +4229,7 @@ const REPORT_TYPES = {
   maint_yote: "Ripoti ya Matengenezo Yote",
   maint_status: "Ripoti ya Hali ya Matengenezo (Kamili/Yanaendelea/Vipuri/Hayajaanza/Hayajalipiwa)",
   maint_incomplete: "Magari Ambayo Matengenezo Hayajakamilika (Yote)",
-  maint_unpaid: "Matengenezo Yaliyokamilika Ila Hayajalipiwa (+Jumla ya Deni)",
+  maint_unpaid: "Matengenezo Yaliyokamilika Ila Hayajalipiwa (Magari + Mifumo, na Siku Zilizopita)",
   maint_not_started: "Magari Ambayo Matengenezo Hayajaanza",
   maint_waiting_parts: "Magari Yanayosubiri Vipuri/Vifaa",
   clients: "Ripoti ya Wateja Bora na Wasiofanya Vizuri",
@@ -4283,6 +4283,7 @@ function officialLogoRow(){
 }
 
 function reportLetterhead(title, range){
+  const rangeLabel = range==='__unpaid__' ? 'Hali ya Sasa (Halichujwi na Kipindi)' : (RANGE_LABELS[range]||'');
   return `
   <div style="text-align:center;border-bottom:3px solid var(--navy);padding-bottom:14px;margin-bottom:18px;">
     ${officialLogoRow()}
@@ -4292,7 +4293,7 @@ function reportLetterhead(title, range){
     <div style="font-size:12.5px;font-weight:700;color:var(--navy);margin-top:2px;">MKOA WA MWANZA</div>
     <div class="small">Mfumo wa Ukaguzi na Matengenezo ya Magari</div>
     <div style="margin-top:10px;font-weight:700;font-size:14px;">${title}</div>
-    <div class="small">Kipindi: ${RANGE_LABELS[range]||''} · Imetolewa: ${fmtDateTime(nowTime())}</div>
+    <div class="small">Kipindi: ${rangeLabel} · Imetolewa: ${fmtDateTime(nowTime())}</div>
   </div>`;
 }
 
@@ -4305,12 +4306,13 @@ function renderReports(el){
           ${Object.keys(REPORT_TYPES).map(k=>`<option value="${k}" ${reportType===k?'selected':''}>${REPORT_TYPES[k]}</option>`).join('')}
         </select>
       </div>
-      <div class="field"><label>Kipindi</label>
+      <div class="field" ${reportType==='maint_unpaid'?'style="display:none;"':''}><label>Kipindi</label>
         <select onchange="reportRange=this.value; renderReports(document.getElementById('view_reports'))">
           ${Object.keys(RANGE_LABELS).map(r=>`<option value="${r}" ${reportRange===r?'selected':''}>${RANGE_LABELS[r]}</option>`).join('')}
         </select>
       </div>
     </div>
+    ${reportType==='maint_unpaid'?'<div class="small" style="color:var(--muted);margin-top:-6px;margin-bottom:10px;">ℹ️ Ripoti hii ya deni haichujwi na "Kipindi" — inaonyesha hali ya sasa (sawa na Dashibodi).</div>':''}
     <button class="btn amber" onclick="printSection('view_reports')">🖨️ Chapisha Ripoti Hii</button>
   </div>
   <div class="card card-pad" id="reportBody">${buildReportBody(reportType, reportRange)}</div>
@@ -4318,7 +4320,7 @@ function renderReports(el){
 }
 
 function buildReportBody(type, range){
-  let body = reportLetterhead(REPORT_TYPES[type], range);
+  let body = reportLetterhead(REPORT_TYPES[type], type==='maint_unpaid' ? '__unpaid__' : range);
   if(type==='vehicles'){
     const vs = DB.vehicles.filter(v=>inRange(vehicleEffectiveDate(v), range));
     body += `<table><thead><tr><th>Namba</th><th>Mmiliki</th><th>Kitengo</th><th>Hali</th><th>Malipo</th><th>Fundi</th></tr></thead><tbody>
@@ -4436,15 +4438,24 @@ function buildReportBody(type, range){
       <div style="margin-top:14px;font-weight:800;font-size:15px;">JUMLA YA MAGARI AMBAYO MATENGENEZO HAYAJAKAMILIKA: ${vs.length}</div>`;
   }
   else if(type==='maint_unpaid'){
-    // Magari ambayo matengenezo yamekamilika lakini malipo bado
-    const vs = DB.vehicles.filter(v=>v.unit==='matengenezo' && v.status==='imekamilika' && !v.paid && inRange(vehicleEffectiveDate(v), range))
-      .sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
-    const totalOwed = vs.reduce((s,v)=>s+Math.max(0, Number(v.totalCost||0) - vehiclePaidTotal(v.id)), 0);
-    body += `<table><thead><tr><th>Namba</th><th>Mmiliki</th><th>Gharama Jumla</th><th>Kilicholipwa</th><th>Deni Lililobaki</th><th>Tarehe Kukamilika</th></tr></thead><tbody>
-      ${vs.map(v=>{ const paid=vehiclePaidTotal(v.id); const owed=Math.max(0,Number(v.totalCost||0)-paid); return `<tr><td>${esc(v.regNo)}</td><td>${esc(v.owner)}</td><td>${fmtMoney(v.totalCost)}</td><td>${fmtMoney(paid)}</td><td style="color:var(--red);font-weight:700;">${fmtMoney(owed)}</td><td>${fmtDate(vehicleEffectiveDate(v))}</td></tr>`; }).join('') || `<tr><td colspan="6">Hakuna magari yenye deni</td></tr>`}
+    // Magari NA Kazi za MIFUMO zilizokamilika lakini bado hazijalipiwa — chanzo kimoja na Dashibodi
+    // (ORODHA HII HAICHUJWI NA "Kipindi" kwa makusudi: deni halibadiliki kwa kuwa tu tumechagua
+    //  wiki/mwezi tofauti — linabaki hadi lilipwe. Hii inahakikisha Ripoti na Dashibodi zinafanana.)
+    const now = new Date();
+    const vs = DB.vehicles.filter(v=>v.unit==='matengenezo' && v.status==='imekamilika' && !v.paid)
+      .map(v=>{ const d=v.completedAt||v.completedDate||vehicleEffectiveDate(v); const paid=vehiclePaidTotal(v.id); const owed=Math.max(0,Number(v.totalCost||0)-paid);
+        return { kind:'Gari', label:v.regNo, sub:v.owner, total:Number(v.totalCost||0), paid, owed, d }; });
+    const mf = DB.mifumoJobs.filter(j=>j.status==='imekamilika' && !j.paid)
+      .map(j=>{ const d=j.completedAt||j.completedDate||mifumoEffectiveDate(j); const paid=mifumoJobPaidTotal(j.id); const owed=Math.max(0,Number(j.totalCost||0)-paid);
+        return { kind:(MIFUMO_TYPE_ICONS[j.jobType]||'')+' Mfumo — '+j.jobType, label:(MIFUMO_TYPE_ICONS[j.jobType]||'')+' '+j.jobType, sub:j.location, total:Number(j.totalCost||0), paid, owed, d }; });
+    const all = vs.concat(mf).filter(x=>x.d).sort((a,b)=> new Date(a.d) - new Date(b.d)); // zilizochelewa zaidi kwanza
+    const totalOwed = all.reduce((s,x)=>s+x.owed, 0);
+    body += `<table><thead><tr><th>Aina</th><th>Namba/Jina</th><th>Mmiliki/Mahali</th><th>Gharama Jumla</th><th>Kilicholipwa</th><th>Deni Lililobaki</th><th>Tarehe Kukamilika</th><th>Siku Zilizopita</th></tr></thead><tbody>
+      ${all.map(x=>{ const days=Math.floor((now-new Date(x.d))/(1000*60*60*24)); return `<tr><td>${x.kind==='Gari'?'🚗 Gari':x.kind}</td><td>${esc(x.label)}</td><td>${esc(x.sub||'—')}</td><td>${fmtMoney(x.total)}</td><td>${fmtMoney(x.paid)}</td><td style="color:var(--red);font-weight:700;">${fmtMoney(x.owed)}</td><td>${fmtDate(x.d)}</td><td style="font-weight:700;${days>=UNPAID_ALERT_DAYS?'color:var(--red);':''}">Siku ${days}</td></tr>`; }).join('') || `<tr><td colspan="8">Hakuna deni lililobaki — magari na mifumo yote yamelipiwa</td></tr>`}
       </tbody></table>
-      <div style="margin-top:14px;font-weight:800;font-size:17px;color:var(--red);">JUMLA YA DENI LILILOBAKI: ${fmtMoney(totalOwed)}</div>
-      <div class="small" style="margin-top:4px;">Idadi ya magari yenye deni: <b>${vs.length}</b></div>`;
+      <div style="margin-top:14px;font-weight:800;font-size:17px;color:var(--red);">JUMLA YA DENI LILILOBAKI (MAGARI + MIFUMO): ${fmtMoney(totalOwed)}</div>
+      <div class="small" style="margin-top:4px;">Idadi ya kazi zenye deni: <b>${all.length}</b> (Magari: ${vs.length}, Mifumo: ${mf.length}) · Zenye zaidi ya siku ${UNPAID_ALERT_DAYS} bila kulipiwa: <b style="color:var(--red);">${all.filter(x=>Math.floor((now-new Date(x.d))/(1000*60*60*24))>=UNPAID_ALERT_DAYS).length}</b></div>
+      <div class="small" style="margin-top:6px;color:var(--muted);">* Orodha hii haichujwi na kigezo cha "Kipindi" hapo juu — inaonyesha DENI LOTE LILILOPO SASA, sawasawa na inavyoonekana kwenye Alarm ya Dashibodi.</div>`;
   }
   else if(type==='maint_not_started'){
     const vs = DB.vehicles.filter(v=>v.unit==='matengenezo' && v.status==='haijaanza' && inRange(vehicleEffectiveDate(v), range))
