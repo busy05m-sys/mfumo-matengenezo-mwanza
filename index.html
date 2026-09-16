@@ -4154,7 +4154,9 @@ function staffNameById(id){ const s=DB.staff.find(x=>x.id===id); return s?s.name
 
 /* ============================== MAONI (Baada ya Huduma — Magari na MIFUMO) ============================== */
 let feedbackPreselect = null; // {refType, refId}
-let feedbackRangeFilter = 'week';
+let feedbackRangeFilter = 'all';
+let generalFeedbackRangeFilter = 'all';
+const FEEDBACK_RANGE_LABELS = {day:'Leo', week:'Wiki Hii', month:'Mwezi Huu', quarter:'Robo Mwaka', half:'Nusu Mwaka', year:'Mwaka Huu', all:'Muda Wote'};
 function goFeedbackFor(refType, refId){ feedbackPreselect = {refType, refId}; go('feedback'); }
 
 function feedbackSubjectLabel(f){
@@ -4182,18 +4184,23 @@ function renderFeedback(el){
 
   el.innerHTML = `
   ${renderGeneralFeedbackForm()}
-  <div class="card" style="margin-bottom:18px;">
+  <div class="card" style="margin-bottom:18px;" id="gf_section">
     <div class="card-head">
       <h3>📋 Maoni Mengine ya Wateja Yaliyokusanywa</h3>
-      <button class="btn secondary sm no-print" onclick="printSection('view_feedback')">🖨️ Chapisha</button>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <div class="pill-tabs" style="margin-bottom:0;">
+          ${Object.keys(FEEDBACK_RANGE_LABELS).map(r=>`<div class="pill-tab ${generalFeedbackRangeFilter===r?'active':''}" onclick="generalFeedbackRangeFilter='${r}';renderFeedback(document.getElementById('view_feedback'))">${FEEDBACK_RANGE_LABELS[r]}</div>`).join('')}
+        </div>
+        <button class="btn secondary sm no-print" onclick="printOnlySubsection('gf_section')">🖨️ Chapisha Haya Tu</button>
+      </div>
     </div>
     <div>
     <div class="table-wrap"><table><thead><tr><th>Tarehe</th><th>Jina la Mteja</th><th>Taasisi</th><th>Mkoa</th><th>Mpokea Maoni</th><th>Maoni</th><th>Hatua Zilizochukuliwa</th><th class="no-print">Hatua</th></tr></thead>
-    <tbody>${DB.generalFeedback.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).map(f=>`<tr>
+    <tbody>${DB.generalFeedback.filter(f=>inRange(f.date, generalFeedbackRangeFilter)).slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).map(f=>`<tr>
       <td>${fmtDate(f.date)}</td><td>${esc(f.customerName)}</td><td>${esc(f.institution)}</td><td>${esc(f.region)}</td>
       <td>${esc(staffNameById(f.receivedByStaffId))}</td><td>${esc(f.comment)}</td><td>${esc(f.actionTaken||'—')}</td>
       <td class="no-print">${canEditNow()?`<button class="btn ghost sm" onclick="editGeneralFeedback('${f.id}')">✏️</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteGeneralFeedback('${f.id}')">Futa</button>`:''}</td>
-    </tr>`).join('') || `<tr><td colspan="8" class="empty">Bado hakuna maoni ya jumla ya wateja</td></tr>`}</tbody></table></div>
+    </tr>`).join('') || `<tr><td colspan="8" class="empty">Bado hakuna maoni ya jumla ya wateja kwenye kipindi hiki</td></tr>`}</tbody></table></div>
     </div>
   </div>
 
@@ -4227,14 +4234,14 @@ function renderFeedback(el){
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="followup_section">
     <div class="card-head">
       <h3>💬 MAONI ya Ufuatiliaji Baada ya Huduma Yaliyokusanywa</h3>
       <div style="display:flex;gap:10px;align-items:center;">
         <div class="pill-tabs" style="margin-bottom:0;">
-          ${['day','week','month'].map(r=>`<div class="pill-tab ${feedbackRangeFilter===r?'active':''}" onclick="feedbackRangeFilter='${r}';renderFeedback(document.getElementById('view_feedback'))">${r==='day'?'Leo':r==='week'?'Wiki Hii':'Mwezi Huu'}</div>`).join('')}
+          ${Object.keys(FEEDBACK_RANGE_LABELS).map(r=>`<div class="pill-tab ${feedbackRangeFilter===r?'active':''}" onclick="feedbackRangeFilter='${r}';renderFeedback(document.getElementById('view_feedback'))">${FEEDBACK_RANGE_LABELS[r]}</div>`).join('')}
         </div>
-        <button class="btn secondary sm no-print" onclick="printSection('view_feedback')">🖨️ Chapisha</button>
+        <button class="btn secondary sm no-print" onclick="printOnlySubsection('followup_section')">🖨️ Chapisha Haya Tu</button>
       </div>
     </div>
     <div class="table-wrap"><table><thead><tr><th>Tarehe</th><th>Kazi</th><th>Mawasiliano</th><th>Siku</th><th>Maoni</th><th>Aliyepiga Simu</th></tr></thead>
@@ -4314,6 +4321,28 @@ function printSection(viewId){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('print-active'));
   document.getElementById(viewId).classList.add('print-active');
   window.print();
+}
+/** Huchapisha SEHEMU MOJA TU ndani ya "view" ya sasa (mfano: Maoni Mengine ya Wateja PEKE YAKE,
+ *  bila kuchapisha pia jedwali la Ufuatiliaji Baada ya Huduma lililo karibu nalo, na kinyume chake).
+ *  Hufanya kazi kwa kuficha kwa muda vipengele vingine vyote vilivyo ndani ya "view" hiyo, kisha
+ *  kuvirudisha mara tu dirisha la kuchapisha linapofungwa (event "afterprint"). */
+function printOnlySubsection(sectionId){
+  const target = document.getElementById(sectionId);
+  if(!target) return;
+  const view = target.closest('.view');
+  if(!view) { printSection(sectionId); return; }
+  const hidden = [];
+  Array.from(view.children).forEach(child=>{
+    if(child.id !== sectionId){ hidden.push({el:child, prev:child.style.display}); child.style.display='none'; }
+  });
+  function restore(){
+    hidden.forEach(h=>{ h.el.style.display = h.prev; });
+    window.removeEventListener('afterprint', restore);
+  }
+  window.addEventListener('afterprint', restore);
+  printSection(view.id);
+  // baadhi ya vivinjari (hasa kwenye simu) havitoi tukio la "afterprint" kwa uhakika — rudisha kwa hakika baada ya muda mfupi
+  setTimeout(restore, 2000);
 }
 
 /* ============================== REPORTS ============================== */
