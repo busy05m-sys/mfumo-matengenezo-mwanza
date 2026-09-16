@@ -398,6 +398,7 @@ function defaultDB(){
     payments: [],          // {id, vehicleId, amount, date, note, createdAt}
     consumables: [],       // {id, itemName, buyer, cost, quantity, usedWhere, date, createdAt}
     feedback: [],            // {id, vehicleId, day, date, comment, calledBy, driverConditionOk, createdAt}
+    generalFeedback: [],     // Maoni ya Wateja (bila kuhusiana na gari): {id, date, customerName, institution, region, receivedByStaffId, comment, actionTaken, createdAt}
     valuations: [],          // Valuation reports
     roadworthiness: [],      // Roadworthiness reports
     boardingOff: [],         // Boarding-off reports
@@ -859,7 +860,7 @@ function maybeAutoBackup(){
 
 /** Shown on load if the whole database looks empty — helps recover from a "lost data" situation instead of silently starting over. */
 function checkForDataRecovery(){
-  const keys = ['vehicles','staff','suppliers','spareParts','payments','consumables','feedback','valuations','roadworthiness','boardingOff','tradeTests','parkingFees','mifumoJobs','inspectionForms'];
+  const keys = ['vehicles','staff','suppliers','spareParts','payments','consumables','feedback','generalFeedback','valuations','roadworthiness','boardingOff','tradeTests','parkingFees','mifumoJobs','inspectionForms'];
   const empty = keys.every(k => (DB[k]||[]).length === 0);
   if(empty && !localStorage.getItem('temesa_seen_recovery_prompt')){
     openModal(`
@@ -1271,8 +1272,15 @@ function renderDashboard(el){
   const repaired = completed.filter(v=>v.unit==='matengenezo').length;
   const inProgress = vs.filter(v=>v.status==='inaendelea').length;
   const waitingParts = vs.filter(v=>v.status==='inasubiri_vipuri').length;
+  const waitingApproval = vs.filter(v=>v.status==='inasubiri_kibali').length;
+  const approvedNotStarted = vs.filter(v=>v.status==='kibali_kimepatikana').length;
   const notStarted = vs.filter(v=>v.status==='haijaanza').length;
-  const unpaid = vs.filter(v=>!v.paid).length;
+  const ongoingPending = inProgress + waitingParts + waitingApproval + approvedNotStarted + notStarted;
+  // "Hayajalipiwa" ni magari/mifumo yaliyokamilika NA yana gharama halisi (>0) NA hayajalipwa —
+  // si magari yote yasiyo na 'paid=true' (mengi ya hayo bado hayajaanza kazi hivyo hayana deni).
+  const unpaidVehicles = completed.filter(v=>!v.paid && Number(v.totalCost||0)>0).length;
+  const unpaidMifumoCount = DB.mifumoJobs.filter(j=>j.status==='imekamilika' && !j.paid && Number(j.totalCost||0)>0).length;
+  const unpaid = unpaidVehicles + unpaidMifumoCount;
 
   const todayRevenue = DB.payments.filter(p=>inRange(p.date,'day')).reduce((a,p)=>a+Number(p.amount||0),0);
   const monthRevenue = DB.payments.filter(p=>inRange(p.date,'month')).reduce((a,p)=>a+Number(p.amount||0),0);
@@ -1296,12 +1304,13 @@ function renderDashboard(el){
       <div class="stat-label">Yaliyokamilika</div><div class="stat-value">${completed.length}</div>
       <div class="stat-sub">${inspected} kukaguliwa · ${repaired} kutengenezwa</div></div>
     <div class="card stat amber"><div class="stat-bar"></div>
-      <div class="stat-label">Yanaendelea / Yanasubiri</div><div class="stat-value">${inProgress+waitingParts+notStarted}</div>
-      <div class="stat-sub">${inProgress} inaendelea · ${waitingParts} vipuri · ${notStarted} haijaanza</div></div>
+      <div class="stat-label">Yanaendelea / Yanasubiri</div><div class="stat-value">${ongoingPending}</div>
+      <div class="stat-sub">${inProgress} inaendelea · ${waitingParts} vipuri · ${waitingApproval} kibali cha mteja · ${approvedNotStarted} kimepewa kibali · ${notStarted} haijaanza</div></div>
     <div class="card stat red"><div class="stat-bar"></div>
       <div class="stat-label">Hayajalipiwa</div><div class="stat-value">${unpaid}</div>
-      <div class="stat-sub">Yanahitaji idhini ya Meneja</div></div>
+      <div class="stat-sub">Magari: ${unpaidVehicles} · Mifumo: ${unpaidMifumoCount} — yanahitaji idhini ya Meneja</div></div>
   </div>
+  <div class="small" style="margin:-12px 0 20px;color:var(--muted);">✅ Jumla ya Magari (${totalVehicles}) = Yaliyokamilika (${completed.length}) + Yanaendelea/Yanasubiri (${ongoingPending})</div>
 
   <div class="grid grid-2" style="margin-bottom:20px;">
     <div class="card stat blue"><div class="stat-bar"></div>
@@ -4075,6 +4084,74 @@ function savePayment(){
   renderFinance(document.getElementById('view_finance'));
 }
 
+/* ============================== MAONI YA JUMLA YA WATEJA (Bila Kuhusiana na Gari) ============================== */
+const TZ_REGIONS_TEMESA = ["Arusha","Dar es Salaam","Dodoma","Geita","Iringa","Kagera","Katavi","Kigoma",
+  "Kilimanjaro","Lindi","Manyara","Mara","Mbeya","Morogoro","Mtwara","Mwanza","Njombe",
+  "Pemba Kaskazini","Pemba Kusini","Pwani","Rukwa","Ruvuma","Shinyanga","Simiyu","Singida",
+  "Songwe","Tabora","Tanga","Unguja Kaskazini","Unguja Kusini","Unguja Mjini Magharibi"];
+let generalFeedbackEditId = null;
+function renderGeneralFeedbackForm(){
+  const f = generalFeedbackEditId ? DB.generalFeedback.find(x=>x.id===generalFeedbackEditId) : null;
+  return `
+  <div class="card" style="margin-bottom:18px;border:2px solid var(--amber);">
+    <div class="card-head"><h3>📝 ${f?'Hariri':'Ongeza'} Maoni ya Mteja (Bila Kujali Kama Ameleta Gari)</h3>
+      <span class="hint">Kwa mteja yeyote anayekuja ofisini — malalamiko, pongezi, ushauri, au taarifa yoyote</span></div>
+    <div class="card-pad">
+      <div class="form-row">
+        <div class="field"><label>Jina la Mteja *</label><input id="gf_name" value="${f?esc(f.customerName):''}" placeholder="Jina kamili"></div>
+        <div class="field"><label>Taasisi Anayotoka *</label><input id="gf_institution" value="${f?esc(f.institution):''}" placeholder="Mf. Halmashauri ya Wilaya ya..., Kampuni ya..."></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Mkoa Anaotoka *</label>
+          <select id="gf_region"><option value="">— Chagua Mkoa —</option>${TZ_REGIONS_TEMESA.map(r=>`<option value="${r}" ${f&&f.region===r?'selected':''}>${r}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Jina la Mpokea Maoni (Mfanyakazi) *</label>
+          <select id="gf_receivedBy"><option value="">— Chagua Mfanyakazi —</option>${DB.staff.map(s=>`<option value="${s.id}" ${f&&f.receivedByStaffId===s.id?'selected':''}>${esc(s.name)}</option>`).join('') || ''}</select>
+        </div>
+      </div>
+      <div class="field"><label>Maoni / Malalamiko ya Mteja *</label><textarea id="gf_comment" placeholder="Andika kwa ufupi kile mteja alichosema...">${f?esc(f.comment):''}</textarea></div>
+      <div class="field"><label>Hatua Zilizochukuliwa (Action Taken)</label><textarea id="gf_action" placeholder="Ni hatua gani zimechukuliwa au zinazopangwa kuchukuliwa kutatua/kujibu maoni haya?">${f?esc(f.actionTaken||''):''}</textarea></div>
+      <div class="form-row">
+        <div class="field"><label>Tarehe</label><input id="gf_date" type="date" value="${f?f.date:todayISO()}"></div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn amber" onclick="saveGeneralFeedback()">${f?'Hifadhi Mabadiliko':'Hifadhi Maoni'}</button>
+        ${f?`<button class="btn secondary" onclick="generalFeedbackEditId=null; renderFeedback(document.getElementById('view_feedback'))">Ghairi Uhariri</button>`:''}
+      </div>
+    </div>
+  </div>`;
+}
+function saveGeneralFeedback(){
+  const customerName = document.getElementById('gf_name').value.trim();
+  const institution = document.getElementById('gf_institution').value.trim();
+  const region = document.getElementById('gf_region').value;
+  const receivedByStaffId = document.getElementById('gf_receivedBy').value;
+  const comment = document.getElementById('gf_comment').value.trim();
+  const actionTaken = document.getElementById('gf_action').value.trim();
+  const date = document.getElementById('gf_date').value || todayISO();
+  if(!customerName || !institution || !region || !receivedByStaffId || !comment){
+    alert('Tafadhali jaza: Jina la Mteja, Taasisi, Mkoa, Mpokea Maoni, na Maoni.'); return;
+  }
+  if(generalFeedbackEditId){
+    const f = DB.generalFeedback.find(x=>x.id===generalFeedbackEditId);
+    Object.assign(f, {customerName, institution, region, receivedByStaffId, comment, actionTaken, date});
+    generalFeedbackEditId = null;
+  } else {
+    DB.generalFeedback.push({id:uid('gfb'), customerName, institution, region, receivedByStaffId, comment, actionTaken, date, createdAt:nowTime()});
+  }
+  saveDB(); toast('Maoni ya mteja yamehifadhiwa','green');
+  renderFeedback(document.getElementById('view_feedback'));
+}
+function editGeneralFeedback(id){ generalFeedbackEditId = id; renderFeedback(document.getElementById('view_feedback')); window.scrollTo(0,0); }
+function deleteGeneralFeedback(id){
+  if(!requireDelete()) return;
+  if(!confirm('Una uhakika unataka kufuta maoni haya ya mteja?')) return;
+  DB.generalFeedback = DB.generalFeedback.filter(f=>f.id!==id);
+  saveDB(); toast('Maoni yamefutwa','green');
+  renderFeedback(document.getElementById('view_feedback'));
+}
+function staffNameById(id){ const s=DB.staff.find(x=>x.id===id); return s?s.name:'—'; }
+
 /* ============================== MAONI (Baada ya Huduma — Magari na MIFUMO) ============================== */
 let feedbackPreselect = null; // {refType, refId}
 let feedbackRangeFilter = 'week';
@@ -4104,8 +4181,24 @@ function renderFeedback(el){
   const preselectVal = feedbackPreselect ? `${feedbackPreselect.refType}:${feedbackPreselect.refId}` : '';
 
   el.innerHTML = `
+  ${renderGeneralFeedbackForm()}
   <div class="card" style="margin-bottom:18px;">
-    <div class="card-head"><h3>📞 Rekodi MAONI Mapya</h3><span class="hint">PS hupiga simu siku ya 1, 2 na 3 baada ya kazi kukamilika. Kazi huonekana hapa kwa siku ${FOLLOWUP_WINDOW_DAYS} tu tangu ikamilike.</span></div>
+    <div class="card-head">
+      <h3>📋 Maoni Mengine ya Wateja Yaliyokusanywa</h3>
+      <button class="btn secondary sm no-print" onclick="printSection('view_feedback')">🖨️ Chapisha</button>
+    </div>
+    <div>
+    <div class="table-wrap"><table><thead><tr><th>Tarehe</th><th>Jina la Mteja</th><th>Taasisi</th><th>Mkoa</th><th>Mpokea Maoni</th><th>Maoni</th><th>Hatua Zilizochukuliwa</th><th class="no-print">Hatua</th></tr></thead>
+    <tbody>${DB.generalFeedback.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).map(f=>`<tr>
+      <td>${fmtDate(f.date)}</td><td>${esc(f.customerName)}</td><td>${esc(f.institution)}</td><td>${esc(f.region)}</td>
+      <td>${esc(staffNameById(f.receivedByStaffId))}</td><td>${esc(f.comment)}</td><td>${esc(f.actionTaken||'—')}</td>
+      <td class="no-print">${canEditNow()?`<button class="btn ghost sm" onclick="editGeneralFeedback('${f.id}')">✏️</button>`:''} ${canDeleteNow()?`<button class="btn ghost sm" onclick="deleteGeneralFeedback('${f.id}')">Futa</button>`:''}</td>
+    </tr>`).join('') || `<tr><td colspan="8" class="empty">Bado hakuna maoni ya jumla ya wateja</td></tr>`}</tbody></table></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <div class="card-head"><h3>📞 Rekodi MAONI Mapya (Ufuatiliaji Baada ya Huduma)</h3><span class="hint">PS hupiga simu siku ya 1, 2 na 3 baada ya kazi kukamilika. Kazi huonekana hapa kwa siku ${FOLLOWUP_WINDOW_DAYS} tu tangu ikamilike.</span></div>
     <div class="card-pad">
       <div class="form-row">
         <div class="field"><label>Chagua Kazi *</label>
@@ -4136,7 +4229,7 @@ function renderFeedback(el){
 
   <div class="card">
     <div class="card-head">
-      <h3>💬 MAONI Yaliyokusanywa</h3>
+      <h3>💬 MAONI ya Ufuatiliaji Baada ya Huduma Yaliyokusanywa</h3>
       <div style="display:flex;gap:10px;align-items:center;">
         <div class="pill-tabs" style="margin-bottom:0;">
           ${['day','week','month'].map(r=>`<div class="pill-tab ${feedbackRangeFilter===r?'active':''}" onclick="feedbackRangeFilter='${r}';renderFeedback(document.getElementById('view_feedback'))">${r==='day'?'Leo':r==='week'?'Wiki Hii':'Mwezi Huu'}</div>`).join('')}
@@ -4581,7 +4674,7 @@ function mergeImportBackup(evt){
 }
 const MERGE_LABELS = {
   vehicles:"Kazi za Magari", staff:"Wafanyakazi", suppliers:"Wazabuni", spareParts:"Vipuri", payments:"Malipo ya Magari",
-  consumables:"Vitu vya Workshop", feedback:"Maoni", valuations:"Uthamini", roadworthiness:"Roadworthiness",
+  consumables:"Vitu vya Workshop", feedback:"Maoni", generalFeedback:"Maoni Mengine ya Wateja", valuations:"Uthamini", roadworthiness:"Roadworthiness",
   boardingOff:"Boarding Off", tradeTests:"Trade Test", parkingFees:"Ada za Parking", mifumoJobs:"Kazi za MIFUMO",
   mifumoPayments:"Malipo ya MIFUMO", vehicleRegistry:"Daftari la Magari", mifumoLocations:"Daftari la Maeneo ya MIFUMO",
   users:"Akaunti za Watumiaji"
@@ -4592,7 +4685,7 @@ const MERGE_LABELS = {
  *  two computers doesn't show up twice in the picker — any job records pointing at the removed duplicate are re-linked
  *  to the entry that was kept, so nothing breaks. */
 async function mergeImportedDB(imported){
-  const arraysToUnion = ['vehicles','staff','suppliers','spareParts','payments','consumables','feedback',
+  const arraysToUnion = ['vehicles','staff','suppliers','spareParts','payments','consumables','feedback','generalFeedback',
     'valuations','roadworthiness','boardingOff','tradeTests','parkingFees','mifumoJobs','mifumoPayments',
     'vehicleRegistry','mifumoLocations','users','stockLevels'];
   const counts = {};
