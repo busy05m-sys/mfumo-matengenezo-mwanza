@@ -286,13 +286,15 @@ a.linklike{color:var(--navy-2);font-weight:700;cursor:pointer;}
 
 /* ---------------------------- FIREBASE / CLOUD DATABASE ---------------------------- */
 const firebaseConfig = {
-  apiKey: "AIzaSyAVkxVnpnY7LUxPYQZGvdMCVT8ZRo9e4js",
-  authDomain: "tmsm-691.firebaseapp.com",
-  projectId: "tmsm-691",
-  storageBucket: "tmsm-691.firebasestorage.app",
-  messagingSenderId: "763792561463",
-  appId: "1:763792561463:web:3459bcd325bdf2d404f6b2"
+  apiKey: "AIzaSyC8QJDVYOJ9yTu8igP_Vk4zdsb1jnJ6tIg",
+  authDomain: "temesa-kiseja-v2.firebaseapp.com",
+  projectId: "temesa-kiseja-v2",
+  storageBucket: "temesa-kiseja-v2.firebasestorage.app",
+  messagingSenderId: "93076234943",
+  appId: "1:93076234943:web:281cbc8ecfe82724e51c0a"
 };
+const TEMESA_ADMIN_EMAIL = 'kisejacl@gmail.com';   // Msimamizi Mkuu (pia umewekwa kwenye Firestore Rules)
+const APP_VERSION = '2.1';
 // Data nzima ya mfumo (DB) inahifadhiwa kama hati (document) MOJA hapa.
 // Faida: mabadiliko kidogo tu kwenye code ya awali. Kikomo: hati moja ya
 // Firestore haizidi 1MB — kwa ukubwa wa taarifa za sasa (mamia machache ya KB)
@@ -321,6 +323,7 @@ try{
   dbDocRef = cloudDB.collection('temesa_mwanza').doc('main_db');
   temesaUsersCollection = cloudDB.collection('temesa_users');
   temesaAuth = firebase.auth();
+  var temesaAuthReadyP = temesaAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(function(){});
   firebaseAvailable = true;
 }catch(e){
   console.error('Firebase haikuweza kuanzishwa (huenda hakuna mtandao) — mfumo utatumia nakala ya ndani pekee.', e);
@@ -328,6 +331,9 @@ try{
 let cloudReady = false;      // true baada ya upakuaji wa kwanza kukamilika
 let cloudSuspiciousEmpty = false; // true endapo database mtandaoni imeonekana tupu kimashaka (angalia bootFromCloud)
 let applyingRemoteUpdate = false; // gubbly-guard: epuka mzunguko wa saveDB<->listener
+let cloudUnsubs = [];
+let lastBootError = null;
+function onSnap(ref, cb, errCb){ const u = ref.onSnapshot(cb, errCb); cloudUnsubs.push(u); return u; }
 
 /* ---------------------------- WATUMIAJI: HATI TOFAUTI KWA KILA MTU ---------------------------- */
 async function loadAllUsers(){
@@ -346,7 +352,7 @@ async function loadAllUsers(){
 }
 function attachUsersCollectionListener(){
   if(!firebaseAvailable || !temesaUsersCollection) return;
-  temesaUsersCollection.onSnapshot(snap=>{
+  onSnap(temesaUsersCollection, snap=>{
     DB.users = snap.docs.map(d=>d.data());
     if(currentUser){
       const fresh = DB.users.find(u=>u.id===currentUser.id);
@@ -371,7 +377,7 @@ async function deleteOneUser(userId){
 }
 
 /* ---------------------------- DATABASE LAYER ---------------------------- */
-const DB_KEY = "temesa_mwanza_db_v1";
+const DB_KEY = "temesa_db_" + firebaseConfig.projectId;   // v2.1: hifadhi ya ndani ni ya mradi huu tu
 
 function uid(prefix){ return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -4658,13 +4664,25 @@ function triggerImport(){ document.getElementById('importFile').click(); }
 function importBackup(evt){
   const file = evt.target.files[0]; if(!file) return;
   const reader = new FileReader();
-  reader.onload = function(e){
+  reader.onload = async function(e){
     try{
       const parsed = JSON.parse(e.target.result);
-      if(!confirm("⚠️ HII ITAFUTA na kubadilisha taarifa ZOTE zilizopo sasa kwenye kompyuta hii na nakala uliyopakia. Kama unataka kuUNGANISHA (kuongeza) badala ya kubadilisha, funga hili na tumia kitufe cha '🔀 Unganisha Nakala' badala yake. Je, unataka kuendelea kubadilisha kila kitu?")) return;
+      if(!confirm("⚠️ HII ITABADILISHA taarifa ZOTE za mfumo (magari, mifumo, malipo, mipangilio n.k.) kwa zile za nakala uliyopakia.\n\nAkaunti za kuingia zilizopo HAZIGUSWI. Watumiaji wa nakala wanaongezwa bila akaunti ya kuingia (utawatengenezea kwenye Watumiaji).\n\nKama unataka KUONGEZA tu bila kubadilisha, tumia \"Unganisha\". Endelea?")) return;
+      const prevUsers = (DB.users||[]).slice();
       const d = defaultDB();
       for(const k in d){ if(parsed[k] !== undefined) d[k] = parsed[k]; }
-      DB = migrateDB(d); saveDB(); toast("Data imeagizwa (imported) kikamilifu","green"); render();
+      const incomingUsers = Array.isArray(d.users) ? d.users : [];
+      DB = migrateDB(d);
+      DB.users = prevUsers;
+      const have = new Set(prevUsers.map(u=>String(u.username||'').toLowerCase()));
+      let added = 0;
+      for(const u of incomingUsers){
+        const un = String(u.username||'').toLowerCase(); if(!un || have.has(un)) continue;
+        const c = {...u, needsAccount:true}; delete c.uid; DB.users.push(c); have.add(un); added++;
+        await saveOneUser(c);
+      }
+      saveDB(); await syncAllowList();
+      toast("Data imeagizwa kikamilifu"+(added?` · Watumiaji ${added} hawana akaunti ya kuingia bado (Watumiaji > Hariri)`:''),"green"); render();
     }catch(err){ toast("Faili si sahihi","red"); }
   };
   reader.readAsText(file);
@@ -4725,6 +4743,7 @@ async function mergeImportedDB(imported){
     let added = 0;
     imported[key].forEach(rec=>{
       if(rec && rec.id && !existingIds.has(rec.id)){
+        if(key==='users'){ rec = {...rec, needsAccount:true}; delete rec.uid; }
         DB[key].push(rec);
         existingIds.add(rec.id);
         added++;
@@ -4750,6 +4769,7 @@ async function mergeImportedDB(imported){
   // hii kuu tena. Kuunganisha faili la JSON hapo juu kunabadilisha DB.users NDANI YA KIFAA HIKI
   // TU - lazima kila mtumiaji atumwe kwenye Firestore mmoja mmoja ili vifaa vingine vimuone pia.
   for(const u of DB.users){ await saveOneUser(u); }
+  await syncAllowList();
   saveDB();
   return counts;
 }
@@ -5996,11 +6016,12 @@ function renderLoginScreen(){
             <button type="button" class="copybtn" onclick="togglePasswordVisibility('li_password', this)">Onyesha</button>
           </div>
         </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin:2px 0 8px;"><input type="checkbox" id="li_remember" style="width:auto;"> Nikumbuke kwenye kifaa hiki <span class="small">(usitumie kwenye kompyuta ya pamoja)</span></label>
         <button class="btn amber" style="width:100%;justify-content:center;margin-top:6px;" onclick="attemptLogin()">Ingia</button>
         <a href="javascript:void(0)" onclick="sendTemesaPasswordReset()" style="display:block;text-align:center;margin-top:10px;font-size:12.5px;color:var(--navy-2);font-weight:700;">Umesahau nenosiri?</a>
       </div>
       <div class="auth-foot">
-        Una tatizo la kuingia? <a href="javascript:void(0)" onclick="renderRecoveryScreen()" style="color:var(--navy-2);font-weight:700;">Bofya hapa</a>
+        Mfumo mpya? <a href="javascript:void(0)" onclick="renderSetupScreen()" style="color:var(--navy-2);font-weight:700;">Tengeneza akaunti ya kwanza (Msimamizi Mkuu)</a><br><span class="small" style="opacity:.6">Toleo ${APP_VERSION}</span>
       </div>
     </div>
   `;
@@ -6013,79 +6034,13 @@ function togglePasswordVisibility(inputId, btn){
   input.type = showing ? 'password' : 'text';
   btn.textContent = showing ? 'Onyesha' : 'Ficha';
 }
-function renderRecoveryScreen(){
-  document.getElementById('authScreen').innerHTML = `
-    <div class="auth-card">
-      <div class="auth-head">
-        <img src="${TEMESA_LOGO_SRC}" alt="TEMESA">
-        <div class="eyebrow">SERIKALI YA TANZANIA</div>
-        <h1>WAKALA WA UFUNDI NA UMEME (TEMESA)<br>MKOA WA MWANZA</h1>
-      </div>
-      <div class="auth-body">
-        <h3 style="font-size:15px;margin-bottom:10px;">Tatizo la Kuingia</h3>
-        <p class="small" style="margin-bottom:16px;line-height:1.6;">
-          Ikiwa nenosiri "sahihi" linakataliwa kwenye kompyuta hii lakini linafanya kazi kwenye kompyuta nyingine,
-          mara nyingi ni kwa sababu akaunti hii iliundwa/kuhifadhiwa kwenye kompyuta hiyo nyingine — hifadhi ya
-          akaunti (username/password) ipo kwenye kivinjari cha kila kompyuta, si ndani ya faili lenyewe.
-          Chagua moja ya njia hizi:
-        </p>
-        <button class="btn secondary" style="width:100%;justify-content:center;margin-bottom:10px;" onclick="renderLoginScreen()">⬅ Rudi Kwenye Kuingia</button>
-        <div class="divider"></div>
-        <div style="margin-bottom:16px;">
-          <div style="font-weight:700;font-size:13px;margin-bottom:4px;">Njia 1 (Bora Zaidi): Leta Akaunti Sahihi</div>
-          <p class="small" style="margin-bottom:8px;">Kwenye kompyuta ambayo login inafanya kazi, bofya "⬇️ Pakua Nakala", kisha hapa bofya kitufe hiki na uchague faili hilo — hii italeta akaunti zote (bila kuathiri taarifa nyingine).</p>
-          <button class="btn secondary" style="width:100%;justify-content:center;" onclick="triggerRecoveryMerge()">🔀 Pakia Nakala ya Akaunti</button>
-          <input type="file" id="recoveryMergeFile" accept="application/json" style="display:none" onchange="recoveryMergeImport(event)">
-        </div>
-        <div class="divider"></div>
-        <div style="margin-bottom:16px;">
-          <div style="font-weight:700;font-size:13px;margin-bottom:4px;">Njia 2: Ingia kwa Dharura (Muda Tu)</div>
-          <p class="small" style="margin-bottom:8px;">Fungua mfumo bila kuingia, ukiwa na ruhusa zote, kwa kikao hiki tu. Baada ya hapo tengeneza/rekebisha akaunti sahihi haraka.</p>
-          <button class="btn amber" style="width:100%;justify-content:center;" onclick="enterEmergencyMode()">🚪 Ingia kwa Dharura</button>
-        </div>
-        <div class="divider"></div>
-        <div>
-          <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--red);">Njia 3 (Mwisho): Anzisha Upya Akaunti Zote</div>
-          <p class="small" style="margin-bottom:8px;">Hii inafuta akaunti ZOTE kwenye kompyuta hii tu (si taarifa za magari/mifumo/malipo — hizo zinabaki salama) na kukurudisha kwenye skrini ya kuunda Msimamizi mpya.</p>
-          <button class="btn red" style="width:100%;justify-content:center;" onclick="resetAllAccounts()">🗑️ Futa Akaunti Zote, Anza Upya</button>
-        </div>
-      </div>
-      <div class="auth-foot">Mfumo wa Ndani wa TEMESA Mwanza</div>
-    </div>
-  `;
-}
-function triggerRecoveryMerge(){ document.getElementById('recoveryMergeFile').click(); }
-function recoveryMergeImport(evt){
-  const file = evt.target.files[0]; if(!file) return;
-  const reader = new FileReader();
-  reader.onload = async function(e){
-    try{
-      const parsed = JSON.parse(e.target.result);
-      const migrated = migrateDB((()=>{ const d=defaultDB(); for(const k in d){ if(parsed[k]!==undefined) d[k]=parsed[k]; } return d; })());
-      await mergeImportedDB(migrated);
-      alert("Akaunti (na taarifa nyingine mpya) zimeongezwa. Sasa jaribu kuingia tena.");
-      renderLoginScreen();
-    }catch(err){ alert("Faili si sahihi: "+err.message); }
-  };
-  reader.readAsText(file);
-}
-function enterEmergencyMode(){
-  if(!confirm("Utaingia kwa muda bila akaunti, ukiwa na ruhusa zote, kwa kikao hiki tu (si cha kudumu). Endelea?")) return;
-  emergencyMode = true;
-  currentUser = { id:'__emergency__', username:'dharura', fullName:'Hali ya Dharura', role:'Msimamizi (Muda)', isAdmin:true, allowedModules: ALL_MODULES.map(m=>m.id), active:true };
-  startApp();
-}
-function resetAllAccounts(){
-  if(!confirm("Una uhakika? Hii itafuta AKAUNTI ZOTE kwenye kompyuta hii (si magari/mifumo/malipo). Huwezi kurudisha nyuma.")) return;
-  const deletions = (DB.users||[]).map(u=>deleteOneUser(u.id).catch(()=>{}));
-  Promise.all(deletions).then(()=>{
-    DB.users = [];
-    try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
-    emergencyMode = false;
-    localStorage.removeItem('temesa_current_user_id');
-    renderSetupScreen();
-  });
-}
+// (v2 salama) Njia za "dharura" na "kurejesha akaunti" kutoka skrini ya kuingia ZIMEONDOLEWA KABISA.
+// Zilimruhusu mtu yeyote kuingia bila nenosiri, kufuta akaunti zote, au kuongeza akaunti — mlango wa nyuma.
+function renderRecoveryScreen(){ renderLoginScreen(); }
+function enterEmergencyMode(){ return false; }
+function resetAllAccounts(){ return false; }
+function triggerRecoveryMerge(){ return false; }
+function recoveryMergeImport(){ return false; }
 function showAuthError(msg){
   const el = document.getElementById('authError');
   el.textContent = msg; el.classList.add('show');
@@ -6104,22 +6059,16 @@ async function createFirstAdmin(){
   if(!fullName || !email || !pw){ showAuthError("Jaza taarifa zote"); return; }
   if(pw.length<6){ showAuthError("Nenosiri liwe angalau herufi 6"); return; }
   if(pw!==pw2){ showAuthError("Manenosiri hayafanani"); return; }
-  const secApp = tempAuthApp();
+  if(!isOwnerEmail(email)){ showAuthError("Akaunti ya kwanza inaweza kuundwa na Msimamizi Mkuu aliyeainishwa pekee."); return; }
   try{
-    const cred = await secApp.auth().createUserWithEmailAndPassword(email, pw);
-    const newUid = cred.user.uid;
-    await secApp.auth().signOut();
-    await secApp.delete();
-    const user = {id:uid('usr'), uid:newUid, username:email, fullName, role:'Msimamizi (Full Access)',
-      allowedModules: ALL_MODULES.map(m=>m.id), isAdmin:true, superAdmin:true, canEdit:true, canDelete:true, active:true, createdAt:nowTime()};
-    DB.users.push(user);
-    await saveOneUser(user);
-    currentUser = user;
-    localStorage.setItem('temesa_current_user_id', user.id);
-    startApp();
+    await temesaAuthReadyP;
+    const cred = await temesaAuth.createUserWithEmailAndPassword(email, pw);
+    try{ await cred.user.sendEmailVerification(); }catch(e){}
+    await temesaAuth.signOut();
+    renderLoginScreen();
+    showAuthError('✅ Akaunti imeundwa. Tumekutumia kiungo cha uthibitisho kwenye '+email+' (angalia pia Spam). Bofya kiungo hicho, kisha ingia hapa.');
   }catch(e){
-    try{ await secApp.delete(); }catch(e2){}
-    showAuthError(temesaAuthErr(e.code));
+    showAuthError(temesaAuthErr(e && e.code));
   }
 }
 function temesaAuthErr(code){
@@ -6136,39 +6085,97 @@ function temesaAuthErr(code){
   };
   return map[code] || ('Hitilafu: '+code);
 }
+/* ===== (v2 salama) KUINGIA KWA AKAUNTI HALISI + ORODHA YA WALIORUHUSIWA =====
+   Kikao cha Firebase ni cha mtumiaji mwenyewe (barua pepe + nenosiri). Firestore Rules zinaruhusu
+   data kusomwa/kuandikwa na waliomo kwenye orodha temesa_config/allowed (au Msimamizi Mkuu aliyethibitishwa). */
+function isOwnerEmail(e){ return String(e||'').toLowerCase()===TEMESA_ADMIN_EMAIL; }
+function allowListFromUsers(){
+  const emails = new Set([TEMESA_ADMIN_EMAIL]), admins = new Set([TEMESA_ADMIN_EMAIL]);
+  (DB.users||[]).forEach(u=>{
+    if(!u || !u.username || u.active===false || u.needsAccount) return;   // asiye na akaunti halisi HAINGII kwenye orodha (kuzuia mtu kuchukua barua pepe yake)
+    const e = String(u.username).toLowerCase(); emails.add(e); if(u.isAdmin) admins.add(e);
+  });
+  return {emails:[...emails], admins:[...admins]};
+}
+async function syncAllowList(){
+  if(!firebaseAvailable || !cloudDB || !currentUser) return;
+  if(!(currentUser.isAdmin || currentUser.superAdmin)) return;
+  const l = allowListFromUsers();
+  try{ await cloudDB.collection('temesa_config').doc('allowed').set({emails:l.emails, admins:l.admins, updatedAt:nowTime()}); }
+  catch(e){ console.warn('syncAllowList imeshindwa', e); }
+}
+async function enterAfterAuth(user){
+  const email = String(user.email||'').toLowerCase();
+  if(isOwnerEmail(email) && !user.emailVerified){
+    try{ await user.sendEmailVerification(); }catch(e){}
+    try{ await temesaAuth.signOut(); }catch(e){}
+    renderLoginScreen();
+    showAuthError('Barua pepe ya Msimamizi Mkuu bado haijathibitishwa. Tumekutumia kiungo cha uthibitisho kwenye '+TEMESA_ADMIN_EMAIL+' (angalia pia Spam). Bofya kiungo hicho, kisha uingie tena.');
+    return;
+  }
+  lastBootError = null;
+  const ok = await bootFromCloud();
+  if(!ok){
+    const denied = lastBootError && lastBootError.code==='permission-denied';
+    try{ await temesaAuth.signOut(); }catch(e){}
+    resetSessionState(); renderLoginScreen();
+    showAuthError(denied ? 'Akaunti hii haijaruhusiwa kuingia kwenye mfumo huu. Wasiliana na Msimamizi.' : 'Imeshindwa kuunganisha na database. Angalia mtandao kisha jaribu tena.');
+    return;
+  }
+  let profile = DB.users.find(u=>u.uid===user.uid);
+  if(!profile && isOwnerEmail(email)){
+    // Msimamizi Mkuu (barua pepe iliyothibitishwa, na ndiye aliyewekwa kwenye Firestore Rules) ana mamlaka ya mwisho:
+    // akikosa wasifu (usanidi wa kwanza, au wasifu wake wa zamani una uid isiyolingana) — anarekebishwa/anaundwa hapa.
+    const byEmail = DB.users.find(u=>String(u.username||'').toLowerCase()===email);
+    if(byEmail){
+      Object.assign(byEmail, {uid:user.uid, isAdmin:true, superAdmin:true, canEdit:true, canDelete:true, active:true});
+      delete byEmail.needsAccount; profile = byEmail;
+    } else {
+      profile = {id:uid('usr'), uid:user.uid, username:email, fullName:email.split('@')[0],
+        role:'Msimamizi (Full Access)', allowedModules: ALL_MODULES.map(m=>m.id),
+        isAdmin:true, superAdmin:true, canEdit:true, canDelete:true, active:true, createdAt:nowTime()};
+      DB.users.push(profile);
+    }
+    await saveOneUser(profile);
+  }
+  if(DB.users.length===0 && cloudSuspiciousEmpty){ renderCloudRecoveryScreen(); return; }
+  if(!profile || profile.active===false){
+    try{ await temesaAuth.signOut(); }catch(e){}
+    resetSessionState(); renderLoginScreen();
+    showAuthError(profile ? 'Akaunti hii imezimwa. Wasiliana na Msimamizi.' : 'Akaunti hii haijasajiliwa kwenye mfumo huu. Wasiliana na Msimamizi.');
+    return;
+  }
+  currentUser = profile;
+  localStorage.setItem('temesa_current_user_id', profile.id);
+  await syncAllowList();
+  startApp();
+}
+function resetSessionState(){
+  cloudUnsubs.forEach(u=>{ try{u();}catch(e){} }); cloudUnsubs = [];
+  currentUser = null; emergencyMode = false; cloudReady = false; cloudSuspiciousEmpty = false;
+  try{ localStorage.removeItem('temesa_current_user_id'); localStorage.removeItem(DB_KEY); }catch(e){}
+  DB = defaultDB();
+}
 async function attemptLogin(){
   const email = document.getElementById('li_email').value.trim();
   const pw = document.getElementById('li_password').value;
   if(!email || !pw){ showAuthError("Jaza barua pepe na nenosiri"); return; }
-  const secApp = tempAuthApp();
+  const remember = !!(document.getElementById('li_remember') && document.getElementById('li_remember').checked);
+  const btn = document.querySelector('#authScreen button[onclick="attemptLogin()"]'), old = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Inaingia...'; }
   try{
-    const cred = await secApp.auth().signInWithEmailAndPassword(email, pw);
-    const verifiedUid = cred.user.uid;
-    await secApp.auth().signOut();
-    await secApp.delete();
-    let profile = DB.users.find(u=>u.uid===verifiedUid);
-    if(!profile && DB.users.length===0){
-      // Kurejesha kiotomatiki: barua pepe/nenosiri hii ni sahihi (Firebase inaithibitisha), lakini
-      // hakuna wasifu wa mtumiaji uliohifadhiwa (mf. hatua ya awali ilikatika katikati). Kwa kuwa
-      // hakuna wasifu MWINGINE wowote uliopo, ni salama kumfanya huyu kuwa Msimamizi Mkuu wa
-      // kwanza moja kwa moja - kama alivyokusudia awali.
-      profile = {id:uid('usr'), uid:verifiedUid, username:email, fullName:email.split('@')[0],
-        role:'Msimamizi (Full Access)', allowedModules: ALL_MODULES.map(m=>m.id),
-        isAdmin:true, superAdmin:true, canEdit:true, canDelete:true, active:true, createdAt:nowTime()};
-      DB.users.push(profile);
-      await saveOneUser(profile);
-    }
-    if(!profile || profile.active===false){
-      showAuthError(profile ? 'Akaunti hii imezimwa. Wasiliana na Msimamizi.' : 'Akaunti hii haijasajiliwa kwenye mfumo huu. Wasiliana na Msimamizi.');
-      return;
-    }
-    currentUser = profile;
-    localStorage.setItem('temesa_current_user_id', profile.id);
-    startApp();
+    if(!firebaseAvailable) throw {code:'auth/network-request-failed'};
+    await temesaAuthReadyP;
+    const P = firebase.auth.Auth.Persistence;
+    try{ await temesaAuth.setPersistence(remember ? P.LOCAL : P.SESSION); }catch(e){}
+    const cred = await temesaAuth.signInWithEmailAndPassword(email, pw);
+    await enterAfterAuth(cred.user);
   }catch(e){
-    try{ await secApp.delete(); }catch(e2){}
-    showAuthError(temesaAuthErr(e.code));
+    try{ await temesaAuth.signOut(); }catch(e2){}
+    showAuthError(temesaAuthErr(e && e.code));
   }
+  const b2 = document.querySelector('#authScreen button[onclick="attemptLogin()"]');
+  if(b2){ b2.disabled = false; b2.textContent = old || 'Ingia'; }
 }
 async function sendTemesaPasswordReset(){
   const email = document.getElementById('li_email').value.trim();
@@ -6178,30 +6185,25 @@ async function sendTemesaPasswordReset(){
     showAuthError('✅ Barua pepe ya kubadili nenosiri imetumwa. Angalia inbox yako (na Spam).');
   }catch(e){ showAuthError(temesaAuthErr(e.code)); }
 }
-function logout(){
+async function logout(){
   if(!confirm("Una uhakika unataka kutoka?")) return;
-  currentUser = null;
-  emergencyMode = false;
-  localStorage.removeItem('temesa_current_user_id');
+  cloudUnsubs.forEach(u=>{ try{u();}catch(e){} }); cloudUnsubs = [];
+  try{ if(temesaAuth) await temesaAuth.signOut(); }catch(e){}
+  resetSessionState();
   document.getElementById('app').style.display='none';
   renderLoginScreen();
 }
-function initAuth(){
-  if(DB.users.length===0){
-    if(cloudSuspiciousEmpty){
-      // Usalama: badala ya kumruhusu mtu "kuunda akaunti ya kwanza" (jambo ambalo lingefuta kabisa
-      // data halisi ya kila mtu mara moja aliporidhia), tunaonyesha onyo na chaguo la kujaribu tena
-      // kuunganisha na database ya mtandaoni kabla ya kuruhusu chochote kingine.
-      renderCloudRecoveryScreen();
-    } else {
-      renderSetupScreen();
-    }
-    return;
-  }
-  const savedId = localStorage.getItem('temesa_current_user_id');
-  const savedUser = savedId ? DB.users.find(u=>u.id===savedId && u.active!==false) : null;
-  if(savedUser){ currentUser = savedUser; startApp(); }
-  else { renderLoginScreen(); }
+// Ukurasa unapofunguliwa (au refresh): rejesha kikao cha mtumiaji aliyeingia; vinginevyo onyesha skrini ya kuingia
+// BILA kupakua data yoyote ya mfumo.
+async function initApp(){
+  if(!firebaseAvailable){ renderLoginScreen(); showAuthError('Hakuna muunganiko wa Firebase. Angalia mtandao kisha onyesha ukurasa upya.'); return; }
+  try{
+    await temesaAuthReadyP;
+    const user = await new Promise(res=>{ const un = temesaAuth.onAuthStateChanged(u=>{ un(); res(u); }); });
+    if(!user){ renderLoginScreen(); return; }
+    renderLoginScreen(); showAuthError('⏳ Inarejesha kikao chako...');
+    await enterAfterAuth(user);
+  }catch(e){ console.error('initApp', e); renderLoginScreen(); }
 }
 /** Skrini ya onyo/usalama - inaonekana TU endapo database mtandaoni imeonekana tupu kimashaka
  *  (ingawa kifaa hiki kimewahi kuiona ikiwa na watumiaji halisi awali). Inazuia kuundwa kwa
@@ -6268,7 +6270,7 @@ function renderUsers(el){
   <div class="card">
     <div class="table-wrap"><table><thead><tr><th>Jina</th><th>Barua Pepe</th><th>Wadhifa</th><th>Ruhusa</th><th>Hali</th><th></th></tr></thead>
     <tbody>${list.map(u=>`<tr>
-      <td style="font-weight:700;">${esc(u.fullName)} ${u.id===currentUser.id?'<span class="badge blue dot">Wewe</span>':''} ${u.superAdmin?'<span class="badge red dot">Mkuu</span>':''}</td>
+      <td style="font-weight:700;">${esc(u.fullName)} ${u.id===currentUser.id?'<span class="badge blue dot">Wewe</span>':''} ${u.superAdmin?'<span class="badge red dot">Mkuu</span>':''} ${u.needsAccount?'<span class="badge red dot">Hana akaunti</span>':''}</td>
       <td class="mono">${esc(u.username)}</td>
       <td>${esc(u.role||'—')}</td>
       <td>${u.isAdmin ? '<span class="badge amber dot">Ruhusa Zote</span>' : `<span class="small">${(u.allowedModules||[]).length} sehemu</span>`}</td>
@@ -6297,8 +6299,8 @@ function openUserForm(id){
       </div>
       ${u ? `
       <div class="field">
-        <button type="button" class="btn secondary sm" onclick="sendResetForUser('${esc(u.username)}')">✉️ Tuma Barua Pepe ya Kubadili Nenosiri</button>
-        <span class="opt">Hii ndiyo njia salama ya kubadili nenosiri la mtumiaji mwingine — hatuwezi tena kuliweka moja kwa moja hapa.</span>
+        ${u.needsAccount ? `<label>Nenosiri la Kuanzia (kuunda akaunti ya kuingia) *</label><input id="uf_newpass" type="password" placeholder="Angalau herufi 6"><span class="opt">Mtumiaji huyu aliletwa kutoka nakala ya zamani na bado hana akaunti ya kuingia kwenye mfumo huu. Weka nenosiri la kuanzia ili kumtengenezea akaunti.</span>` : `<button type="button" class="btn secondary sm" onclick="sendResetForUser('${esc(u.username)}')">✉️ Tuma Barua Pepe ya Kubadili Nenosiri</button>
+        <span class="opt">Hii ndiyo njia salama ya kubadili nenosiri la mtumiaji mwingine — hatuwezi tena kuliweka moja kwa moja hapa.</span>`}
       </div>` : `
       <div class="form-row">
         <div class="field"><label>Nenosiri la Awali *</label><input id="uf_password" type="password" placeholder="Angalau herufi 6"></div>
@@ -6412,8 +6414,21 @@ async function saveUser(id){
     const isActive = activeBox ? activeBox.checked : true;
     const u = DB.users.find(x=>x.id===id);
     if(u){
+      if(u.needsAccount){
+        const np = (document.getElementById('uf_newpass')||{}).value || '';
+        if(np){
+          if(np.length<6){ err.textContent="Nenosiri liwe angalau herufi 6"; err.classList.add('show'); return; }
+          try{
+            const sec = firebase.initializeApp(firebaseConfig, 'secondary_temesa_'+Date.now());
+            const c = await sec.auth().createUserWithEmailAndPassword(u.username, np);
+            u.uid = c.user.uid; delete u.needsAccount;
+            await sec.auth().signOut(); await sec.delete();
+          }catch(e2){ err.textContent = temesaAuthErr(e2 && e2.code); err.classList.add('show'); return; }
+        }
+      }
       Object.assign(u, { fullName, role, allowedModules, isAdmin, canEdit, canDelete, active:isActive });
       await saveOneUser(u);
+      await syncAllowList();
     }
     closeModal(); toast("Taarifa za mtumiaji zimehifadhiwa","green");
     renderUsers(document.getElementById('view_users'));
@@ -6437,6 +6452,7 @@ async function saveUser(id){
     const newUser = {id:uid('usr'), uid:newUid, username:email, fullName, role, allowedModules, isAdmin, canEdit, canDelete, active:true, createdAt:nowTime()};
     DB.users.push(newUser);
     await saveOneUser(newUser);
+    await syncAllowList();
     closeModal();
     toast(`Mtumiaji ameongezwa. Mpe barua pepe: ${email} na nenosiri: ${pw}`,"green");
     renderUsers(document.getElementById('view_users'));
@@ -6452,6 +6468,7 @@ async function deleteUser(id){
   if(!confirm("Una uhakika unataka kufuta mtumiaji huyu?")) return;
   DB.users = DB.users.filter(u=>u.id!==id);
   await deleteOneUser(id);
+  await syncAllowList();
   toast("Mtumiaji amefutwa","green");
   renderUsers(document.getElementById('view_users'));
 }
@@ -6536,15 +6553,12 @@ async function bootFromCloud(){
     // Firebase haikupatikana kabisa (mtandao mbovu/haipo) — endelea na nakala ya ndani pekee,
     // kama mfumo ulivyokuwa awali kabla ya database ya mtandaoni.
     updateCloudBadge(false);
-    toast("Hakuna muunganiko wa Firebase (mtandao). Unatumia nakala ya ndani ya kifaa hiki kwa sasa.","amber");
-    initAuth();
-    return;
+    toast("Hakuna muunganiko wa Firebase (mtandao). Haiwezekani kuingia kwa sasa.","amber");
+    return false;
   }
   try{
-    // Sign in kimya kimya (bila jina/nenosiri) ili Firestore Security Rules ziweze
-    // kuruhusu ufikiaji WA APP HII TU (kupitia mtandao wa Firebase Auth), na kuzuia
-    // mtu yeyote wa nje asiye na app hii kufikia database moja kwa moja.
-    await firebase.auth().signInAnonymously();
+    // (v2 salama) Hakuna tena "anonymous sign-in": mtumiaji ameshaingia kwa akaunti yake halisi kabla ya hapa.
+    DB = defaultDB();   // v2.1: kamwe usitumie data ya zamani iliyobaki kwenye kifaa kuamua hali ya mfumo; chanzo ni database pekee
     // MUHIMU: tunalazimisha kusoma moja kwa moja kutoka SERVER (sio "cache" ya kivinjari) ili
     // tusipate taarifa za zamani/pungufu baada ya kifaa kukaa muda mrefu bila kutumika (idle).
     const snap = await dbDocRef.get({source:'server'});
@@ -6554,9 +6568,9 @@ async function bootFromCloud(){
       // Alama ya usalama: tumewahi kuona watumiaji halisi mtandaoni. Hii inatumika kuzuia
       // mfumo usije "ukaanzisha upya" (na kufuta kila kitu) endapo siku moja database
       // itaonekana tupu kimakosa (mfano tatizo la muda la mtandao).
-      if(DB.users && DB.users.length>0){ try{ localStorage.setItem('temesa_ever_synced_users','1'); }catch(e){} }
+      if(DB.users && DB.users.length>0){ try{ localStorage.setItem('temesa_ever_synced_users_'+firebaseConfig.projectId,'1'); }catch(e){} }
     } else {
-      const everSynced = (()=>{ try{ return localStorage.getItem('temesa_ever_synced_users')==='1'; }catch(e){ return false; } })();
+      const everSynced = (()=>{ try{ return localStorage.getItem('temesa_ever_synced_users_'+firebaseConfig.projectId)==='1'; }catch(e){ return false; } })();
       if(everSynced){
         // HATARI: kifaa hiki kimewahi kuona data halisi ya watumiaji mtandaoni awali, lakini sasa
         // database inaonekana haipo/tupu — hii ni ISHARA YA TATIZO (sio mfumo mpya kabisa).
@@ -6574,7 +6588,7 @@ async function bootFromCloud(){
     updateCloudBadge(true);
     // Watumiaji: pakia kutoka kwenye "temesa_users" - kila mtu ana hati yake YENYEWE (angalia
     // maelezo juu ya temesaUsersCollection). Hii ndiyo chanzo halisi cha akaunti sasa.
-    const oldBlobUsers = Array.isArray(DB.users) ? DB.users.slice() : [];
+    const oldBlobUsers = [];   // v2.1: hakuna uhamishaji wa watumiaji kutoka 'blob' ya zamani (ungeingiza data ya zamani kwenye mradi mpya)
     const gotUsers = await loadAllUsers();
     if(!gotUsers){
       if(oldBlobUsers.length>0 && DB.users.length===0){
@@ -6584,6 +6598,7 @@ async function bootFromCloud(){
         DB.users = oldBlobUsers;
       }
       toast("⚠️ Imeshindwa kuthibitisha orodha ya watumiaji kutoka mtandaoni. Weka upya ukurasa (refresh) ukiwa na mtandao mzuri.","red");
+      lastBootError = {code:'users-load-failed'}; return false;
     } else if(DB.users.length===0 && oldBlobUsers.length>0){
       // Mara ya kwanza kuhamia kwenye muundo mpya (temesa_users bado tupu) - hamisha
       // watumiaji waliokuwepo kwenye blob ya zamani kwenda kwenye hati zao mpya, mmoja mmoja.
@@ -6592,12 +6607,15 @@ async function bootFromCloud(){
     }
     attachUsersCollectionListener();
   }catch(e){
-    console.error('Cloud boot failed, tunatumia nakala ya ndani (offline)', e);
+    lastBootError = e;
+    console.error('Cloud boot failed', e);
     updateCloudBadge(false);
-    toast("Imeshindwa kuunganisha na database ya mtandaoni. Kwa sasa unatumia nakala ya ndani ya kifaa hiki.","red");
+    if(e && e.code==='permission-denied') return false;
+    toast("Imeshindwa kuunganisha na database ya mtandaoni. Jaribu tena.","red");
+    return false;
   }
   attachCloudListener();
-  initAuth();
+  return true;
 }
 
 /** Husikiliza mabadiliko kutoka kwa vifaa/watumiaji wengine wanaotumia mfumo huu huu, na
@@ -6605,7 +6623,7 @@ async function bootFromCloud(){
  *  wenyewe (hasPendingWrites) ili isijirudie mzunguko usio na maana. */
 function attachCloudListener(){
   if(!firebaseAvailable || !dbDocRef) return;
-  dbDocRef.onSnapshot(snap=>{
+  onSnap(dbDocRef, snap=>{
     if(!snap.exists) return;
     if(snap.metadata.hasPendingWrites) return; // ni andiko letu wenyewe, bado halijathibitishwa na server
     const data = snap.data();
@@ -6642,7 +6660,7 @@ function attachCloudListener(){
 }
 
 /* ============================== INIT ============================== */
-bootFromCloud();
+initApp();
 
 
 </script>
