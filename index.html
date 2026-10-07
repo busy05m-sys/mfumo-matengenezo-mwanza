@@ -294,7 +294,7 @@ const firebaseConfig = {
   appId: "1:93076234943:web:281cbc8ecfe82724e51c0a"
 };
 const TEMESA_ADMIN_EMAIL = 'kisejacl@gmail.com';   // Msimamizi Mkuu (pia umewekwa kwenye Firestore Rules)
-const APP_VERSION = '2.1';
+const APP_VERSION = '2.3';
 // Data nzima ya mfumo (DB) inahifadhiwa kama hati (document) MOJA hapa.
 // Faida: mabadiliko kidogo tu kwenye code ya awali. Kikomo: hati moja ya
 // Firestore haizidi 1MB — kwa ukubwa wa taarifa za sasa (mamia machache ya KB)
@@ -698,6 +698,9 @@ function saveDB(){
       .catch(err=>{
         console.error('Cloud save failed', err);
         updateCloudBadge(false);
+        if(err && (err.code==='invalid-argument' || /maximum size|exceeds|too large/i.test(String(err.message||err)))){
+          toast("⚠️ Data imekuwa kubwa kupita kikomo cha hifadhi ya mtandaoni (1 MB) — mabadiliko HAYAHIFADHIWI mtandaoni. Wasiliana na msimamizi wa mfumo SASA na upakue nakala.","red");
+        }
       });
   }
   // If connected to a real file on disk, write there too — this is the durable copy
@@ -710,6 +713,7 @@ function saveDB(){
   }
   changesSinceBackup++;
   maybeAutoBackup();
+  try{ updateStorageBadge(false); }catch(e){}
 }
 
 /* ---------------------------- ROBUST PERSISTENCE: IndexedDB shadow copy + Real File Sync ---------------------------- */
@@ -4815,6 +4819,7 @@ function buildTopbarActions(){
   document.getElementById('topbarActions').innerHTML = `
     <span id="cloudBadge" class="badge gray dot" style="margin-right:2px;">☁️ Inaunganisha...</span>
     <span id="syncBadge" class="badge gray dot" style="margin-right:2px;">Inaangalia...</span>
+    ${currentUser.isAdmin ? `<span id="storageBadge" class="badge gray dot" style="margin-right:2px;cursor:pointer;" onclick="openStorageModal()" title="Hifadhi ya mtandaoni">💾 ...</span>` : ''}
     <button class="btn ghost sm" onclick="connectRealFile()" title="Unganisha faili halisi kwenye kompyuta yako kwa uhifadhi wa uhakika zaidi">🔒 Unganisha Faili Salama</button>
     <button class="btn ghost sm" onclick="openEmailModal()" title="Pakua taarifa na kufungua barua pepe kutuma">✉️ Tuma Barua Pepe</button>
     <button class="btn ghost sm" onclick="exportBackup()">⬇️ Pakua Nakala</button>
@@ -6246,6 +6251,7 @@ function startApp(){
   document.getElementById('app').style.display='flex';
   buildSidebar();
   buildTopbarActions();
+  try{ updateStorageBadge(true); }catch(e){}
   const firstAllowed = currentUser.isAdmin ? 'dashboard' : (currentUser.allowedModules[0] || null);
   if(!firstAllowed){ toast("Akaunti hii haina ruhusa ya kuona sehemu yoyote. Wasiliana na Msimamizi.","red"); return; }
   go(firstAllowed);
@@ -6657,6 +6663,140 @@ function attachCloudListener(){
     console.error('Cloud listener error', err);
     updateCloudBadge(false);
   });
+}
+
+
+/* ===== v2.3: Kiashiria cha "Inapakia…" + kipimo cha hifadhi (muonekano na tahadhari tu — data haibadiliki) ===== */
+(function(){
+  var st = {all:0, fg:0, barT:null, pillT:null, cueT:null, last:0};
+  function ensure(){
+    if(document.getElementById('busyBar')) return;
+    var css = document.createElement('style');
+    css.textContent =
+      '#busyBar{position:fixed;top:0;left:0;right:0;height:5px;z-index:100000;overflow:hidden;display:none;background:rgba(11,51,80,.14);pointer-events:none}'
+     +'#busyBar i{position:absolute;top:0;left:0;width:35%;height:100%;background:var(--amber,#E8871E);animation:busySlide 1.1s ease-in-out infinite;will-change:transform}'
+     +'@keyframes busySlide{0%{transform:translateX(-100%)}100%{transform:translateX(290%)}}'
+     +'#busyPill{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:100000;display:none;align-items:center;gap:8px;padding:9px 18px;border-radius:999px;background:var(--navy,#0B3350);color:#fff;font:600 13px system-ui;box-shadow:0 4px 16px rgba(0,0,0,.28);pointer-events:none}'
+     +'#busyPill b{width:14px;height:14px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:busySpin .8s linear infinite}'
+     +'@keyframes busySpin{to{transform:rotate(360deg)}}'
+     +'.btn:active,button:active{transform:scale(.97)}';
+    document.head.appendChild(css);
+    var bar = document.createElement('div'); bar.id='busyBar'; bar.innerHTML='<i></i>'; document.body.appendChild(bar);
+    var pill = document.createElement('div'); pill.id='busyPill'; pill.innerHTML='<b></b><span>Inapakia…</span>'; document.body.appendChild(pill);
+  }
+  function showBar(){ ensure(); document.getElementById('busyBar').style.display='block'; }
+  function hideBar(){ var b=document.getElementById('busyBar'); if(b) b.style.display='none'; }
+  function showPill(){ ensure(); document.getElementById('busyPill').style.display='flex'; }
+  function hidePill(){ var p=document.getElementById('busyPill'); if(p) p.style.display='none'; }
+  function busyStart(fg){ st.all++; if(fg) st.fg++; if(!st.barT){ st.barT=setTimeout(showBar,80); } if(fg && !st.pillT){ st.pillT=setTimeout(showPill,350); } }
+  function busyEnd(fg){
+    st.all=Math.max(0,st.all-1); if(fg) st.fg=Math.max(0,st.fg-1);
+    if(st.all===0){ clearTimeout(st.barT); st.barT=null; if(!st.cueT) hideBar(); }
+    if(st.fg===0){ clearTimeout(st.pillT); st.pillT=null; hidePill(); }
+  }
+  window.busyStart = busyStart; window.busyEnd = busyEnd;
+  function fgNow(){ return (Date.now()-st.last) < 2500; }
+  function wrapMethod(obj, n){
+    var o = obj && obj[n]; if(typeof o!=='function' || o.__busy) return;
+    var w = function(){
+      var fg = fgNow(); busyStart(fg); var p;
+      try{ p = o.apply(this, arguments); }catch(e){ busyEnd(fg); throw e; }
+      if(!p || typeof p.then!=='function'){ busyEnd(fg); return p; }
+      return p.then(function(v){ busyEnd(fg); return v; }, function(e){ busyEnd(fg); throw e; });
+    };
+    w.__busy = true; try{ obj[n] = w; }catch(e){}
+  }
+  // Rejeo (ref) za Firestore: ongeza kiashiria kwenye get/set/update/delete, na kwenye rejeo zozote zinazotokana nazo
+  function instr(ref){
+    if(!ref || ref.__instr) return ref;
+    ['get','set','update','delete'].forEach(function(n){ wrapMethod(ref, n); });
+    ['doc','collection'].forEach(function(n){
+      var f = ref[n]; if(typeof f!=='function' || f.__busy) return;
+      var g = function(){ return instr(f.apply(this, arguments)); }; g.__busy = true; try{ ref[n] = g; }catch(e){}
+    });
+    try{ ref.__instr = true; }catch(e){}
+    return ref;
+  }
+  try{ if(cloudDB && typeof cloudDB.collection==='function'){ var cf = cloudDB.collection.bind(cloudDB); cloudDB.collection = function(){ return instr(cf.apply(null, arguments)); }; } }catch(e){}
+  try{ instr(dbDocRef); instr(temesaUsersCollection); }catch(e){}
+  try{ ['signInWithEmailAndPassword','createUserWithEmailAndPassword','sendPasswordResetEmail','signOut'].forEach(function(n){ wrapMethod(temesaAuth, n); }); }catch(e){}
+  // Vitendo vikuu vya mtumiaji (pia vinatumia app ya pili ya Firebase kuunda akaunti)
+  function wrapFn(fn){ return async function(){ busyStart(true); try{ return await fn.apply(this, arguments); } finally{ busyEnd(true); } }; }
+  try{ attemptLogin = wrapFn(attemptLogin); }catch(e){}
+  try{ saveUser = wrapFn(saveUser); }catch(e){}
+  try{ deleteUser = wrapFn(deleteUser); }catch(e){}
+  try{ createFirstAdmin = wrapFn(createFirstAdmin); }catch(e){}
+  try{ sendTemesaPasswordReset = wrapFn(sendTemesaPasswordReset); }catch(e){}
+  try{ sendResetForUser = wrapFn(sendResetForUser); }catch(e){}
+  // Mwitikio wa papo hapo mtumiaji anapobonyeza kitufe (hata kama kazi ni ya ndani ya kifaa tu)
+  function onPress(e){
+    var t = e.target && e.target.closest ? e.target.closest('button,[onclick],a,.nav-item,.tab,.sb-item') : null;
+    if(!t || t.disabled) return;
+    st.last = Date.now(); showBar(); clearTimeout(st.cueT);
+    st.cueT = setTimeout(function(){ st.cueT=null; if(st.all===0) hideBar(); }, 700);
+  }
+  document.addEventListener('pointerdown', onPress, true);
+  document.addEventListener('keydown', function(e){ if(e.key==='Enter') st.last = Date.now(); }, true);
+})();
+
+/* ===== v2.3: KIPIMO CHA HIFADHI (kikomo cha 1 MB cha hati ya mtandaoni) ===== */
+const STORAGE_LIMIT = 1048576;   // kikomo cha Firestore kwa hati moja (byte)
+function dbBytes(){
+  let s = ''; try{ s = JSON.stringify(DB); }catch(e){ return 0; }
+  try{ return new Blob([s]).size + 200; }catch(e){ return s.length + 200; }
+}
+function storageSizeLog(b){
+  const key = 'temesa_size_log_' + firebaseConfig.projectId, today = todayISO();
+  let log = {}; try{ log = JSON.parse(localStorage.getItem(key) || '{}'); }catch(e){}
+  log[today] = b;
+  const days = Object.keys(log).sort(); while(days.length>150){ delete log[days.shift()]; }
+  try{ localStorage.setItem(key, JSON.stringify(log)); }catch(e){}
+  return log;
+}
+function storageForecast(b, log){
+  const days = Object.keys(log).sort(); if(days.length<2) return null;
+  const d0 = new Date(days[0]), d1 = new Date(days[days.length-1]), span = (d1-d0)/86400000;
+  if(span < 7) return null;
+  const perDay = (log[days[days.length-1]] - log[days[0]]) / span;
+  if(perDay <= 0) return {perDay:0, daysLeft:Infinity};
+  return {perDay, daysLeft:Math.floor((STORAGE_LIMIT-b)/perDay)};
+}
+function updateStorageBadge(warn){
+  if(typeof currentUser==='undefined' || !currentUser || !currentUser.isAdmin) return;
+  const b = dbBytes(), pct = b/STORAGE_LIMIT*100;
+  storageSizeLog(b);
+  const el = document.getElementById('storageBadge');
+  if(el){
+    const cls = pct>=80 ? 'red' : pct>=60 ? 'amber' : 'green';
+    el.className = 'badge ' + cls + ' dot';
+    el.textContent = '💾 ' + Math.round(pct) + '%';
+    el.title = 'Hifadhi ya mtandaoni: ' + Math.round(b/1024) + ' KB kati ya 1024 KB';
+  }
+  if(warn && pct>=70){
+    const k = 'temesa_size_warned_' + firebaseConfig.projectId, today = todayISO();
+    let last = ''; try{ last = localStorage.getItem(k) || ''; }catch(e){}
+    if(last !== today){
+      try{ localStorage.setItem(k, today); }catch(e){}
+      setTimeout(()=>toast('⚠️ Hifadhi ya mtandaoni imejaa '+Math.round(pct)+'%. Bofya alama ya 💾 juu kwa maelezo, na wasiliana na msimamizi wa mfumo.', 'red'), 1200);
+    }
+  }
+}
+function openStorageModal(){
+  const b = dbBytes(), pct = Math.round(b/STORAGE_LIMIT*1000)/10, kb = Math.round(b/1024);
+  const col = pct>=80 ? '#C0392B' : pct>=60 ? '#E8871E' : '#1E8E3E';
+  const f = storageForecast(b, storageSizeLog(b));
+  const fc = f ? (f.daysLeft===Infinity ? 'Data haikui kwa sasa.' : `Kwa kasi ya sasa (takriban ${Math.max(1,Math.round(f.perDay))} byte kwa siku), kikomo kitafikiwa baada ya takriban <b>${f.daysLeft>60 ? Math.round(f.daysLeft/30)+' miezi' : f.daysLeft+' siku'}</b>.`) : 'Kadirio la muda litaonekana baada ya siku 7 za matumizi.';
+  openModal(`
+    <div class="modal-head"><h3>💾 Hifadhi ya Mtandaoni</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div style="font-size:26px;font-weight:800;color:${col};">${pct}%</div>
+      <div style="height:12px;background:#E5EAF0;border-radius:99px;overflow:hidden;margin:8px 0 10px;"><div style="height:100%;width:${Math.min(100,pct)}%;background:${col};"></div></div>
+      <p>Zinatumika <b>${kb} KB</b> kati ya <b>1024 KB</b> (kikomo cha hati moja ya mtandaoni).</p>
+      <p class="small" style="line-height:1.6;">${fc}</p>
+      <p class="small" style="line-height:1.6;"><b>Ukifika kikomo:</b> mabadiliko mapya <b>hayatahifadhiwa mtandaoni</b> (yatabaki kwenye kompyuta moja tu) na vifaa vingine havitayaona.</p>
+      <p class="small" style="line-height:1.6;"><b>Hatua:</b> pakua nakala ya akiba mara kwa mara (<b>⬇️ Pakua Nakala</b>). Ukifika <b>70%</b>, mwambie msimamizi wa mfumo ili data igawanywe kwenye hati kadhaa.</p>
+    </div>
+    <div class="modal-foot"><button class="btn amber" onclick="closeModal()">Sawa</button></div>`);
 }
 
 /* ============================== INIT ============================== */
